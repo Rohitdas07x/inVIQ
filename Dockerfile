@@ -52,17 +52,18 @@ RUN mkdir -p /app/logs
 # Copy the entire venv from the builder stage
 COPY --from=builder /venv /venv
 
-# Copy application code (backend only — frontend served separately)
+# Copy application code and Alembic migrations
 COPY backend/app ./backend/app
+COPY backend/alembic ./backend/alembic
+COPY backend/alembic.ini ./backend/alembic.ini
 COPY requirements.txt .
 
 # Activate the venv for all subsequent commands
 ENV PATH="/venv/bin:$PATH"
 ENV VIRTUAL_ENV="/venv"
 
-# Ensure venv site-packages are FIRST in Python's module search path.
-# This prevents the system Python from shadowing venv packages (e.g. typing_extensions).
-ENV PYTHONPATH="/app/backend"
+# Ensure venv site-packages and app modules are in Python search path
+ENV PYTHONPATH="/app/backend:/app"
 ENV PYTHONHOME=""
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -74,11 +75,11 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run alembic migrations then start gunicorn.
+# Run alembic migrations from /app/backend then start gunicorn from /app.
 # `exec` replaces the shell so signals (SIGTERM) still reach gunicorn.
 CMD ["sh", "-c", \
      "cd /app/backend && /venv/bin/alembic upgrade head && \
-      exec /venv/bin/gunicorn backend.app.main:app \
+      cd /app && exec /venv/bin/gunicorn app.main:app \
         --worker-class uvicorn.workers.UvicornWorker \
         --workers 3 \
         --bind 0.0.0.0:8000 \
