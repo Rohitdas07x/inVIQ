@@ -92,3 +92,7 @@ class PasswordResetConfirmRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
+
+
+class GithubAuthRequest(BaseModel):
+    code: str

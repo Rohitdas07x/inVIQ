@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_VERIFY_URL: str = (
         "https://www.googleapis.com/oauth2/v3/userinfo"
     )
+    # Google OAuth 2.0 credentials — used by both backend token verification
+    # and the public config endpoint that delivers the Client ID to the frontend.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    # GitHub OAuth credentials
+    GITHUB_CLIENT_ID: str = ""
+    GITHUB_CLIENT_SECRET: str = ""
     SARVAM_API_KEY: str = ""
 
     # ── Derived helpers ────────────────────────────────────────────────

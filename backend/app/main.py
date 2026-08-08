@@ -150,3 +150,16 @@ def health_check():
             "redis": "connected" if redis_ok else "unavailable",
         },
     )
+
+
+@app.get("/api/config/public")
+def public_config():
+    """Return non-sensitive config values that the frontend needs at boot time.
+
+    Only the Google and GitHub Client IDs (public by nature) are exposed here.
+    Client Secrets are NEVER returned.
+    """
+    return {
+        "google_client_id": settings.GOOGLE_CLIENT_ID or "",
+        "github_client_id": settings.GITHUB_CLIENT_ID or "",
+    }

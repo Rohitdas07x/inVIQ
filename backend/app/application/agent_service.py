@@ -59,8 +59,17 @@ def _build_agent():
         return
 
     try:
+        import os
         from langchain_groq import ChatGroq
         from langgraph.prebuilt import create_react_agent
+
+        # Push LangSmith settings into os.environ for LangChain/LangGraph telemetry
+        if settings.LANGCHAIN_TRACING_V2 and settings.LANGCHAIN_TRACING_V2.lower() == "true" and settings.LANGCHAIN_API_KEY:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = settings.LANGCHAIN_API_KEY
+            os.environ["LANGCHAIN_PROJECT"] = settings.LANGCHAIN_PROJECT
+            os.environ["LANGCHAIN_ENDPOINT"] = settings.LANGCHAIN_ENDPOINT
+            logger.info("LangSmith tracing active for project '%s'", settings.LANGCHAIN_PROJECT)
 
         llm = ChatGroq(
             model=settings.LLM_MODEL,

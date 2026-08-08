@@ -41,6 +41,7 @@ from app.api.schemas.auth_schemas import (
     VerifyEmailRequest,
     PasswordResetConfirmRequest,
     GoogleAuthRequest,
+    GithubAuthRequest,
 )
 
 import secrets
@@ -1065,3 +1066,182 @@ def google_auth(
     except httpx.RequestError as e:
         logger.error(f"Google OAuth error: {e}")
         raise AuthenticationError("Failed to verify Google account")
+
+
+# ── POST /github-auth ──────────────────────────────────────────────────────
+
+
+@router.post("/github-auth", response_model=dict)
+@limiter.limit("10/minute")
+def github_auth(
+    request: Request,
+    request_body: GithubAuthRequest,
+    db: Session = Depends(get_user_repo),
+):
+    """Authenticate or register user via GitHub OAuth."""
+    if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
+        raise AuthenticationError("GitHub OAuth is not configured on the server")
+
+    try:
+        # Step 1: Exchange code for GitHub access token
+        token_resp = httpx.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": settings.GITHUB_CLIENT_ID,
+                "client_secret": settings.GITHUB_CLIENT_SECRET,
+                "code": request_body.code,
+            },
+            timeout=10,
+        )
+
+        if token_resp.status_code != 200:
+            raise AuthenticationError("Failed to exchange GitHub authorization code")
+
+        token_data = token_resp.json()
+        gh_access_token = token_data.get("access_token")
+        if not gh_access_token:
+            error_desc = token_data.get("error_description", "Invalid GitHub authorization code")
+            raise AuthenticationError(error_desc)
+
+        # Step 2: Fetch user profile from GitHub
+        user_resp = httpx.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {gh_access_token}",
+                "Accept": "application/json",
+                "User-Agent": "InvIQ-Auth",
+            },
+            timeout=10,
+        )
+
+        if user_resp.status_code != 200:
+            raise AuthenticationError("Failed to fetch GitHub profile")
+
+        gh_user = user_resp.json()
+        github_email = gh_user.get("email")
+        github_name = gh_user.get("name") or gh_user.get("login", "")
+        github_login = gh_user.get("login", "")
+
+        # If email is private on GitHub profile, fetch from user emails endpoint
+        if not github_email:
+            emails_resp = httpx.get(
+                "https://api.github.com/user/emails",
+                headers={
+                    "Authorization": f"Bearer {gh_access_token}",
+                    "Accept": "application/json",
+                    "User-Agent": "InvIQ-Auth",
+                },
+                timeout=10,
+            )
+            if emails_resp.status_code == 200:
+                for em in emails_resp.json():
+                    if em.get("primary") and em.get("verified"):
+                        github_email = em.get("email")
+                        break
+                    if not github_email and em.get("verified"):
+                        github_email = em.get("email")
+
+        if not github_email:
+            github_email = f"{github_login}@users.noreply.github.com"
+
+        # Step 3: Check if user exists
+        user = db.get_by_email(github_email)
+
+        if user:
+            # Existing user - log them in
+            if not user.is_active:
+                raise AuthenticationError("User account is disabled")
+
+            db.record_login(user)
+
+            access_token = create_access_token(
+                {
+                    "sub": str(user.id),
+                    "username": user.username,
+                    "role": user.role,
+                    "org_id": user.org_id,
+                }
+            )
+            refresh_token = create_refresh_token(
+                {"sub": str(user.id), "username": user.username}
+            )
+
+            audit = AuditService(db.db)
+            audit.log(
+                username=user.username,
+                action="GITHUB_LOGIN",
+                resource_type="user",
+                resource_id=str(user.id),
+                user_id=user.id,
+                ip_address=_get_client_ip(request),
+            )
+
+            return {
+                "success": True,
+                "message": "Login successful via GitHub",
+                "data": {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "token_type": "bearer",
+                    "user": _user_dict(user),
+                },
+            }
+
+        # Step 4: New user - auto register
+        base_username = github_login or github_email.split("@")[0]
+        username = base_username
+        counter = 1
+        while db.get_by_username(username):
+            username = f"{base_username}{counter}"
+            counter += 1
+
+        user = db.create(
+            email=github_email,
+            username=username,
+            password=hash_password(secrets.token_urlsafe(32)),
+            full_name=github_name,
+            role="staff",
+        )
+
+        user.is_verified = True
+        user.is_active = True
+        db.update(user)
+
+        access_token = create_access_token(
+            {
+                "sub": str(user.id),
+                "username": user.username,
+                "role": user.role,
+                "org_id": user.org_id,
+            }
+        )
+        refresh_token = create_refresh_token(
+            {"sub": str(user.id), "username": user.username}
+        )
+
+        audit = AuditService(db.db)
+        audit.log(
+            username=user.username,
+            action="GITHUB_REGISTER",
+            resource_type="user",
+            resource_id=str(user.id),
+            user_id=user.id,
+            details={"email": github_email, "github_login": github_login},
+            ip_address=_get_client_ip(request),
+        )
+
+        return {
+            "success": True,
+            "message": "Account created successfully via GitHub",
+            "data": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "bearer",
+                "user": _user_dict(user),
+            },
+        }
+
+    except httpx.RequestError as e:
+        logger.error(f"GitHub OAuth error: {e}")
+        raise AuthenticationError("Failed to verify GitHub account")
