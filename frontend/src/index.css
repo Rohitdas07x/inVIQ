@@ -284,3 +284,36 @@ body {
 .auth-gate-dismiss:hover {
   color: #64748b;
 }
+
+/* Animated gradient for the AI Assistant logo */
+@keyframes gradient-shift {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+.animate-gradient {
+  animation: gradient-shift 8s linear infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+/* Shine Border Keyframes & Utilities */
+@keyframes shine-anim {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
+.animate-shine {
+  animation: shine-anim var(--duration, 14s) infinite linear;
+}
