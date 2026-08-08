@@ -1,5 +1,10 @@
 import { useId } from "react";
-import { cn } from "../../lib/utils";
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+function cn(...inputs) {
+  return twMerge(clsx(inputs));
+}
 
 function DotPattern({
   width = 16,
@@ -19,7 +24,7 @@ function DotPattern({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 h-full w-full fill-neutral-400/80",
-        className,
+        className
       )}
       {...props}
     >
