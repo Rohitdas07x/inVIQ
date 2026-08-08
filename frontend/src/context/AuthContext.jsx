@@ -15,10 +15,13 @@ import api, { auth } from '../services/api';
 const AuthContext = createContext(null);
 export const AuthContextConsumer = AuthContext;
 
-/** Decode JWT payload without a library (tokens are base64 encoded, not encrypted). */
+/** Decode JWT payload safely without throwing exceptions on malformed tokens */
 function decodeJwt(token) {
+    if (!token || typeof token !== 'string') return null;
     try {
-        const base64Url = token.split('.')[1];
+        const parts = token.split('.');
+        if (parts.length < 2 || !parts[1]) return null;
+        const base64Url = parts[1];
         const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
         const json = decodeURIComponent(
             atob(base64)
@@ -34,9 +37,14 @@ function decodeJwt(token) {
 
 /** Check if token is expired or will expire within buffer (seconds) */
 function isTokenExpired(token, bufferSeconds = 60) {
-    const payload = decodeJwt(token);
-    if (!payload || !payload.exp) return true;
-    return payload.exp * 1000 < Date.now() + bufferSeconds * 1000;
+    if (!token || typeof token !== 'string') return true;
+    try {
+        const payload = decodeJwt(token);
+        if (!payload || !payload.exp) return true;
+        return payload.exp * 1000 < Date.now() + bufferSeconds * 1000;
+    } catch {
+        return true;
+    }
 }
 
 export function AuthProvider({ children }) {
@@ -147,9 +155,47 @@ export function AuthProvider({ children }) {
         };
     }, [refreshAccessToken]);
 
-    // ── Login ──────────────────────────────────────────────────────────────
+    // ── Login (username + password) ────────────────────────────────────────
     const login = useCallback(async (username, password) => {
         const response = await api.post('/auth/login', { username, password });
+        const { access_token, refresh_token } = response.data.data;
+
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
+
+        const payload = decodeJwt(access_token);
+        const userData = {
+            id: payload.sub,
+            username: payload.username,
+            role: payload.role,
+        };
+        setUser(userData);
+        return userData;
+    }, []);
+
+    // ── Login (Google OAuth) ───────────────────────────────────────────────
+    // Receives the credential (ID token) from Google's OAuth popup,
+    // exchanges it for InvIQ JWT tokens via POST /auth/google-auth.
+    const loginWithGoogle = useCallback(async (idToken) => {
+        const response = await api.post('/auth/google-auth', { id_token: idToken });
+        const { access_token, refresh_token } = response.data.data;
+
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
+
+        const payload = decodeJwt(access_token);
+        const userData = {
+            id: payload.sub,
+            username: payload.username,
+            role: payload.role,
+        };
+        setUser(userData);
+        return userData;
+    }, []);
+
+    // ── Login (GitHub OAuth) ───────────────────────────────────────────────
+    const loginWithGithub = useCallback(async (code) => {
+        const response = await api.post('/auth/github-auth', { code });
         const { access_token, refresh_token } = response.data.data;
 
         localStorage.setItem('access_token', access_token);
@@ -187,6 +233,8 @@ export function AuthProvider({ children }) {
         user,
         loading,
         login,
+        loginWithGoogle,
+        loginWithGithub,
         logout,
         isAdmin,
         isManager,

@@ -1,12 +1,17 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 import { auth } from "../../services/api";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, ArrowLeft } from "lucide-react";
 
 export const LightSignUp = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { loginWithGoogle, loginWithGithub, isAuthenticated } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [githubLoading, setGithubLoading] = useState(false);
   const [error, setError] = useState("");
   const [formData, setFormData] = useState({
     full_name: "",
@@ -15,6 +20,58 @@ export const LightSignUp = () => {
     password: "",
     role: "staff"
   });
+
+  const from = "/dashboard";
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get("code");
+    if (code) {
+      setGithubLoading(true);
+      loginWithGithub(code)
+        .then(() => {
+          navigate(from, { replace: true });
+        })
+        .catch((err) => {
+          const msg =
+            err?.response?.data?.detail ||
+            err?.response?.data?.message ||
+            "GitHub registration failed. Please try again.";
+          setError(msg);
+        })
+        .finally(() => {
+          setGithubLoading(false);
+        });
+    }
+
+    if (window.location.hash) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const accessToken = hashParams.get("access_token");
+      if (accessToken) {
+        setGoogleLoading(true);
+        loginWithGoogle(accessToken)
+          .then(() => {
+            navigate(from, { replace: true });
+          })
+          .catch((err) => {
+            const msg =
+              err?.response?.data?.detail ||
+              err?.response?.data?.message ||
+              "Google sign-up failed.";
+            setError(msg);
+          })
+          .finally(() => {
+            setGoogleLoading(false);
+          });
+      }
+    }
+  }, [location.search, loginWithGithub, loginWithGoogle, navigate]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -35,7 +92,7 @@ export const LightSignUp = () => {
         err?.response?.data?.message;
       
       if (status === 403) {
-        setError("Self-registration is disabled. Please contact your administrator to create an account.");
+        setError("Self-registration is disabled. Please sign up using Google, GitHub, or contact your administrator.");
       } else {
         setError(msg || "Registration failed. Please try again.");
       }
@@ -44,134 +101,195 @@ export const LightSignUp = () => {
     }
   };
 
+  const handleGoogleLogin = () => {
+    const clientId = "232640553692-bk12l0dqojirdv31gsr8geag0aju75jf.apps.googleusercontent.com";
+    const redirectUri = window.location.origin + window.location.pathname;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=openid%20email%20profile`;
+    window.location.href = authUrl;
+  };
+
+  const handleGithubLogin = () => {
+    const clientId = "Ov23liZ03BT7aTqs2GxB";
+    const redirectUri = window.location.origin + window.location.pathname;
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email`;
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4">
-      <div className="w-full max-w-[400px] bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100 relative">
-        <div className="absolute top-0 left-0 right-0 h-48 bg-gradient-to-b from-blue-100 via-blue-50 to-transparent opacity-40 blur-3xl -mt-20"></div>
-        <div className="p-7">
-          <div className="flex flex-col items-center mb-6">
-            <div className="flex items-center gap-2.5 mb-5 relative z-10">
-              <svg width="36" height="36" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="28" height="28" rx="8" fill="#3B82F6" />
-                <path d="M10 8H18M14 8V20M10 20H18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span className="font-bold text-2xl tracking-tight text-slate-900">Inviq</span>
-            </div>
-            <div className="p-0 relative z-10">
-              <h2 className="text-2xl font-bold text-gray-900 text-center">
-                Request Account
-              </h2>
-              <p className="text-center text-gray-500 mt-2">
-                Self-registration is disabled. Contact your administrator.
-              </p>
+    <div className="min-h-screen flex items-center justify-center bg-[#FAFAFA] relative overflow-hidden p-4">
+      {/* Clean Subtle Grid Lines & Soft Ambient Glow */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-indigo-100/40 rounded-full blur-[100px]" />
+        <div className="absolute top-[20%] right-[-10%] w-[60vw] h-[60vw] bg-blue-50/40 rounded-full blur-[120px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px]" />
+      </div>
+
+      <button
+        onClick={() => navigate('/')}
+        className="absolute top-6 left-6 z-20 flex items-center gap-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white/90 hover:bg-white backdrop-blur-md px-4 py-2 rounded-full border border-slate-200 shadow-xs transition-all"
+      >
+        <ArrowLeft size={14} />
+        <span>Back to Home</span>
+      </button>
+
+      <div className="w-full max-w-[420px] bg-white rounded-3xl shadow-xl shadow-slate-900/5 border border-slate-200/90 overflow-hidden relative z-10 p-8 sm:p-9">
+        <div className="flex flex-col items-center mb-6">
+          <div className="flex items-center gap-2.5 mb-3">
+            <img src="/logo.png" alt="InvIQ Logo" className="w-9 h-9 object-contain" />
+            <span className="font-extrabold text-2xl tracking-tight text-slate-900">InvIQ</span>
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900 text-center">
+            Create Account
+          </h2>
+          <p className="text-center text-slate-500 text-xs sm:text-sm mt-1">
+            Sign up or continue with Google / GitHub
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-5 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm rounded-xl px-4 py-3 shadow-xs">
+            <AlertCircle size={16} className="shrink-0 text-red-500" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Full Name
+            </label>
+            <input
+              type="text"
+              name="full_name"
+              required
+              value={formData.full_name}
+              onChange={handleChange}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-500/15 transition-all"
+              placeholder="Enter your full name"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Email
+            </label>
+            <input
+              type="email"
+              name="email"
+              required
+              value={formData.email}
+              onChange={handleChange}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-500/15 transition-all"
+              placeholder="Enter your email"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Username
+            </label>
+            <input
+              type="text"
+              name="username"
+              required
+              value={formData.username}
+              onChange={handleChange}
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-500/15 transition-all"
+              placeholder="Choose a username"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Password
+            </label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                name="password"
+                required
+                minLength={8}
+                value={formData.password}
+                onChange={handleChange}
+                className="w-full px-3.5 py-2.5 pr-12 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-500/15 transition-all"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 hover:text-slate-700 px-2 py-1 rounded transition-colors"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
             </div>
           </div>
 
-          {error && (
-            <div className="mb-5 flex items-center gap-2 bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl px-4 py-3 shadow-sm relative z-10">
-              <AlertCircle size={16} className="shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl transition-all shadow-md shadow-blue-600/25 active:scale-[0.99] flex items-center justify-center disabled:opacity-60 disabled:pointer-events-none"
+          >
+            {loading ? (
+              <>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                <span>Creating account…</span>
+              </>
+            ) : (
+              "Sign Up"
+            )}
+          </button>
 
-          <form onSubmit={handleSubmit} className="space-y-5 p-0 relative z-10">
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-gray-700">
-                Full Name
-              </label>
-              <input
-                type="text"
-                name="full_name"
-                required
-                value={formData.full_name}
-                onChange={handleChange}
-                className="bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 h-11 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus:border-blue-500 w-full px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                placeholder="Enter your full name"
-              />
-            </div>
+          <div className="flex items-center my-4">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="px-3 text-xs font-medium text-slate-400 uppercase tracking-wider">
+              or continue with
+            </span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
 
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                type="email"
-                name="email"
-                required
-                value={formData.email}
-                onChange={handleChange}
-                className="bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 h-11 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus:border-blue-500 w-full px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                placeholder="Enter your email"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-gray-700">
-                Username
-              </label>
-              <input
-                type="text"
-                name="username"
-                required
-                value={formData.username}
-                onChange={handleChange}
-                className="bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 h-11 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus:border-blue-500 w-full px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                placeholder="Choose a username"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <label className="text-sm font-medium text-gray-700">
-                  Password
-                </label>
-              </div>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  name="password"
-                  required
-                  minLength={8}
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="bg-gray-50 border-gray-200 text-gray-900 pr-12 h-11 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus:border-blue-500 w-full px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-blue-600 hover:bg-gray-100 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium h-9 px-3 transition-colors"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-11 bg-gradient-to-t from-blue-600 via-blue-500 to-blue-400 hover:from-blue-700 hover:via-blue-600 hover:to-blue-500 text-white font-medium rounded-lg transition-all duration-200 shadow-sm hover:shadow-md hover:shadow-blue-100 active:scale-[0.98] inline-flex items-center justify-center whitespace-nowrap text-sm disabled:pointer-events-none disabled:opacity-60"
+          <div className="grid grid-cols-2 gap-3">
+            <button 
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading}
+              className="h-11 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-all shadow-2xs disabled:opacity-50"
             >
-              {loading ? (
-                <>
-                  <Loader2 size={16} className="animate-spin mr-2" />
-                  Creating account...
-                </>
+              {googleLoading ? (
+                <Loader2 size={16} className="animate-spin text-blue-600" />
               ) : (
-                "Sign Up"
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" />
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                </svg>
               )}
+              <span>{googleLoading ? "Signing up..." : "Google"}</span>
             </button>
 
-            <div className="p-0 mt-6 relative z-10">
-              <p className="text-sm text-center text-gray-500 w-full">
-                Already have an account?{" "}
-                <a href="/signin" className="text-blue-600 hover:underline font-medium">
-                  Sign in
-                </a>
-              </p>
-            </div>
-          </form>
-        </div>
+            <button 
+              type="button" 
+              onClick={handleGithubLogin}
+              disabled={githubLoading}
+              className="h-11 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 text-slate-700 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-all shadow-2xs disabled:opacity-50"
+            >
+              {githubLoading ? (
+                <Loader2 size={16} className="animate-spin text-slate-800" />
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.6.113.82-.26.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.386-1.332-1.755-1.332-1.755-1.087-.744.084-.729.084-.729 1.205.085 1.84 1.236 1.84 1.236 1.07 1.835 2.809 1.305 3.493.997.108-.776.42-1.305.763-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.627-5.373-12-12-12z" fill="#24292F" />
+                </svg>
+              )}
+              <span>{githubLoading ? "Connecting..." : "GitHub"}</span>
+            </button>
+          </div>
+
+          <p className="text-xs text-center text-slate-500 pt-3">
+            Already have an account?{" "}
+            <a href="/signin" className="text-blue-600 font-bold hover:underline">
+              Sign in
+            </a>
+          </p>
+        </form>
       </div>
     </div>
   );

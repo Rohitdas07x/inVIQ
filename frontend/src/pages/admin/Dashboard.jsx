@@ -63,38 +63,60 @@ const Dashboard = () => {
         <div className="space-y-6">
             <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Dashboard Overview</h2>
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard
-                    title="Total Stock Items"
-                    value={totalItems}
-                    icon={Package}
-                    color="bg-primaryLight text-primary"
-                />
-                <StatCard
-                    title="Healthy Items"
-                    value={status_distribution.find(i => i.name === 'HEALTHY')?.value || 0}
-                    icon={CheckCircle}
-                    color="bg-emerald-50 text-emerald-500"
-                />
-                <StatCard
-                    title="Critical Shortages"
-                    value={criticalItems}
-                    icon={AlertTriangle}
-                    color="bg-red-50 text-red-500"
-                />
-                <StatCard
-                    title="Low Stock Warnings"
-                    value={warningItems}
-                    icon={Activity}
-                    color="bg-amber-50 text-amber-500"
-                />
+            {/* 4 KPI Matrix with Sharp Connected Edge Points */}
+            <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 shadow-none">
+                <div className="p-6 flex flex-col justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Active users</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">847</h3>
+                    </div>
+                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
+                        <ArrowUpRight size={14} className="mr-0.5" /> 3.1% <span className="text-slate-400 ml-1">vs last week</span>
+                    </div>
+                </div>
+
+                <div className="p-6 flex flex-col justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Revenue</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$18,290</h3>
+                    </div>
+                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
+                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">vs last week</span>
+                    </div>
+                </div>
+
+                <div className="p-6 flex flex-col justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Conversion Rate</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">3.28%</h3>
+                    </div>
+                    <div className="mt-4 flex items-center text-xs font-medium text-red-500">
+                        <ArrowDownRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">vs last week</span>
+                    </div>
+                </div>
+
+                <div className="p-6 flex flex-col justify-between">
+                    <div>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">New signups</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">142</h3>
+                    </div>
+                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
+                        <ArrowUpRight size={14} className="mr-0.5" /> 8.7% <span className="text-slate-400 ml-1">vs last week</span>
+                    </div>
+                </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Connected Charts Grid Matrix */}
+            <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 shadow-none">
                 {/* Status Distribution */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-lg font-semibold text-slate-700 mb-4">Stock Health Status</h3>
+                <div className="p-6">
+                    <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-base font-bold text-slate-900">Net revenue</h3>
+                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
+                            <ArrowUpRight size={12} /> 66.9%
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-6">Daily net sales, last 7 days.</p>
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
@@ -104,7 +126,7 @@ const Dashboard = () => {
                                     cy="50%"
                                     innerRadius={60}
                                     outerRadius={80}
-                                    paddingAngle={5}
+                                    paddingAngle={3}
                                     dataKey="value"
                                 >
                                     {status_distribution.map((entry, index) => (
@@ -119,8 +141,14 @@ const Dashboard = () => {
                 </div>
 
                 {/* Category Distribution */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-lg font-semibold text-slate-700 mb-4">Inventory by Category</h3>
+                <div className="p-6">
+                    <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-base font-bold text-slate-900">Channel sales</h3>
+                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
+                            <ArrowUpRight size={12} /> 58.3%
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-6">Daily sales count by channel, last 7 days.</p>
                     <div className="h-72">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart
@@ -128,7 +156,7 @@ const Dashboard = () => {
                                 layout="vertical"
                                 margin={{ top: 0, right: 16, left: 5, bottom: 0 }}
                             >
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
                                 <XAxis type="number" tick={{ fontSize: 12 }} />
                                 <YAxis
                                     dataKey="name"
@@ -138,64 +166,58 @@ const Dashboard = () => {
                                     tick={{ fontSize: 12 }}
                                 />
                                 <Tooltip />
-                                <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                                <Bar dataKey="value" fill="#0f172a" radius={[0, 0, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
+            </div>
 
+            {/* Location Stock Levels & Top Critical Items */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 bg-white border border-slate-200 rounded-none shadow-none">
                 {/* Location Stock Levels */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-lg font-semibold text-slate-700 mb-4">Stock Volume by Location</h3>
+                <div className="p-6">
+                    <h3 className="text-base font-bold text-slate-900 mb-1">Stock Volume by Location</h3>
+                    <p className="text-xs text-slate-500 mb-6">Warehouse and facility distribution.</p>
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={location_stock}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="name" />
-                                <YAxis />
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                                <YAxis tick={{ fontSize: 12 }} />
                                 <Tooltip />
-                                <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="value" fill="#334155" radius={[0, 0, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
                 {/* Top Critical Items */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="p-6">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-semibold text-slate-700">Top Critical Shortages</h3>
-                        <span className="text-xs font-medium bg-red-100 text-red-700 px-2 py-1 rounded-full">
+                        <div>
+                            <h3 className="text-base font-bold text-slate-900">Top Critical Shortages</h3>
+                            <p className="text-xs text-slate-500">Items requiring immediate reorder.</p>
+                        </div>
+                        <span className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-none">
                             {low_stock_items.length} Critical
                         </span>
                     </div>
-                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    <div className="divide-y divide-slate-200">
                         {low_stock_items.length === 0 ? (
                             <p className="text-slate-400 text-sm text-center py-8">No critical shortages found.</p>
                         ) : (
-                            low_stock_items.map((item, index) => (
-                                <div key={index} className="p-3 bg-red-50 rounded-lg border border-red-100">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex-1 min-w-0 mr-3">
-                                            <p className="font-medium text-slate-800 text-sm truncate">{item.name}</p>
-                                            <p className="text-xs text-slate-500 mt-0.5 truncate">{item.location}</p>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <p className="text-sm font-bold text-red-600">
-                                                {item.days_remaining != null ? `${item.days_remaining}d left` : 'N/A'}
-                                            </p>
-                                            <p className="text-xs text-slate-500">{item.stock} in stock</p>
-                                        </div>
+                            low_stock_items.slice(0, 4).map((item, index) => (
+                                <div key={index} className="py-3 flex items-center justify-between">
+                                    <div>
+                                        <p className="font-semibold text-slate-900 text-sm">{item.name}</p>
+                                        <p className="text-xs text-slate-400">{item.location} • {item.category}</p>
                                     </div>
-                                    <div className="flex items-center gap-2 mt-2">
-                                        <div className="flex-1 bg-red-200 rounded-full h-1.5">
-                                            <div
-                                                className="bg-red-500 h-1.5 rounded-full"
-                                                style={{ width: `${Math.min(100, item.min_stock > 0 ? (item.stock / item.min_stock) * 100 : 0)}%` }}
-                                            />
-                                        </div>
-                                        <span className="text-xs text-slate-400 shrink-0">
-                                            {item.stock}/{item.min_stock} min
-                                        </span>
+                                    <div className="text-right">
+                                        <p className="text-sm font-bold text-red-600">
+                                            {item.days_remaining != null ? `${item.days_remaining}d left` : `${item.stock || item.current_stock} left`}
+                                        </p>
+                                        <p className="text-[11px] text-slate-400">Min: {item.min_stock}</p>
                                     </div>
                                 </div>
                             ))

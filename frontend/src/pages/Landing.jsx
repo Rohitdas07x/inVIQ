@@ -4,19 +4,28 @@
  */
 
 import React from 'react';
-import { Sparkles, Search, Download, Plus, ChevronDown, ArrowUpRight, ArrowDownRight, MapPin, Box, Layers, Check, ArrowLeft, ArrowRight, Phone, TrendingUp, Play, HelpCircle, Star, Activity, Zap, Network, LineChart, Lock, Globe, PanelLeftClose, Ship, Truck, CreditCard, Calendar, Clock, LayoutDashboard, BarChart3, Users, Menu, X } from 'lucide-react';
+import { Sparkles, Search, Download, Plus, ChevronDown, ArrowUpRight, ArrowDownRight, MapPin, Box, Layers, Check, ArrowLeft, ArrowRight, Phone, TrendingUp, Play, HelpCircle, Star, Activity, Zap, Network, LineChart, Lock, Globe, PanelLeftClose, Ship, Truck, CreditCard, Calendar, Clock, LayoutDashboard, BarChart3, Users, Menu, X, AlertTriangle } from 'lucide-react';
+import { ShineBorder } from '../components/ui/shine-border';
+import { DotPattern } from '../components/ui/dot-pattern';
 
 const LogoIcon = () => (
-  <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="28" height="28" rx="8" fill="#3B82F6" />
-    <path d="M10 8H18M14 8V20M10 20H18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
+  <img src="/logo.png" alt="InvIQ Logo" className="w-8 h-8 object-contain" />
 );
 
 export default function Landing() {
   const [openFaq, setOpenFaq] = React.useState(0);
   const [currentTestimonial, setCurrentTestimonial] = React.useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const [isScrolled, setIsScrolled] = React.useState(false);
+
+  React.useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 30);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const testimonials = [
     {
@@ -85,12 +94,16 @@ export default function Landing() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:100px_100px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_0%,#000_70%,transparent_100%)]" />
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24">
-        {/* Navbar */}
-        <nav className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white/80 backdrop-blur-md rounded-full border border-slate-200/60 shadow-sm mb-12 md:mb-20">
-          <div className="flex items-center gap-2">
+      {/* Sticky Expanding Navbar — Flawless Mobile & Desktop */}
+      <header className="fixed top-2 sm:top-3 inset-x-0 z-50 px-3 sm:px-6 pointer-events-none flex justify-center transition-all duration-300">
+        <nav className={`pointer-events-auto flex items-center justify-between transition-all duration-300 ease-in-out ${
+          isScrolled
+            ? 'w-full max-w-6xl px-4 sm:px-8 py-2.5 sm:py-3 bg-white/95 backdrop-blur-xl shadow-xl shadow-slate-900/5 border border-slate-200 rounded-2xl sm:rounded-full'
+            : 'w-full max-w-4xl px-4 sm:px-6 py-2 sm:py-2.5 bg-white/85 backdrop-blur-md shadow-sm border border-slate-200/70 rounded-full'
+        }`}>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <LogoIcon />
-            <span className="font-semibold text-lg tracking-tight">Inviq</span>
+            <span className="font-bold text-lg sm:text-xl tracking-tight text-slate-900">InvIQ</span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
             {['features', 'process', 'pricing', 'faq', 'customers'].map((id) => (
@@ -103,342 +116,411 @@ export default function Landing() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button 
+              onClick={() => window.location.href = '/signin'} 
+              className="text-slate-600 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold hover:text-slate-900 hover:bg-slate-100 transition-colors"
+            >
+              Log In
+            </button>
             <button 
               onClick={() => window.location.href = '/signup'} 
-              className="hidden md:block bg-black text-white px-5 py-2.5 rounded-full text-sm font-medium hover:bg-slate-800 transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-colors shadow-sm shadow-blue-600/20"
             >
               Sign up
             </button>
             <button
-              className="md:hidden p-2 rounded-full hover:bg-slate-100 transition-colors"
+              className="md:hidden p-1.5 rounded-full hover:bg-slate-100 text-slate-700 transition-colors pointer-events-auto"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle Menu"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </nav>
+      </header>
 
-        {/* Mobile Menu Dropdown */}
-        {mobileMenuOpen && (
-          <div className="md:hidden fixed inset-x-4 top-20 z-50 bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 flex flex-col gap-4">
-            {['features', 'process', 'pricing', 'faq', 'customers'].map((id) => (
-              <button
-                key={id}
-                onClick={() => { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }); setMobileMenuOpen(false); }}
-                className="text-left py-2 text-slate-700 font-medium capitalize border-b border-slate-100 last:border-0"
-              >
-                {id === 'faq' ? 'FAQ' : id.charAt(0).toUpperCase() + id.slice(1)}
-              </button>
-            ))}
+      {/* Mobile Menu Dropdown */}
+      {mobileMenuOpen && (
+        <div className="md:hidden fixed inset-x-3 top-16 z-50 bg-white/98 backdrop-blur-2xl rounded-3xl border border-slate-200 shadow-2xl p-5 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <LogoIcon />
+              <span className="font-bold text-lg text-slate-900">InvIQ Menu</span>
+            </div>
+            <button onClick={() => setMobileMenuOpen(false)} className="p-1 rounded-full text-slate-400 hover:bg-slate-100">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          {['features', 'process', 'pricing', 'faq', 'customers'].map((id) => (
+            <button
+              key={id}
+              onClick={() => { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }); setMobileMenuOpen(false); }}
+              className="text-left py-2 px-3 rounded-xl text-slate-700 font-medium capitalize hover:bg-slate-50 transition-colors"
+            >
+              {id === 'faq' ? 'FAQ' : id.charAt(0).toUpperCase() + id.slice(1)}
+            </button>
+          ))}
+          <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+            <button
+              onClick={() => window.location.href = '/signin'}
+              className="w-full border border-slate-200 text-slate-700 py-2.5 rounded-full text-sm font-semibold hover:bg-slate-50 transition-colors"
+            >
+              Log In
+            </button>
             <button
               onClick={() => window.location.href = '/signup'}
-              className="mt-2 w-full bg-black text-white py-3 rounded-full text-sm font-medium hover:bg-slate-800 transition-colors"
+              className="w-full bg-blue-600 text-white py-2.5 rounded-full text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
             >
               Sign up
             </button>
           </div>
-        )}
+        </div>
+      )}
+
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 sm:pt-28 pb-20">
 
         {/* Hero Section */}
-        <div className="text-center max-w-4xl mx-auto mb-12 md:mb-20 px-2">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-sm font-medium mb-6 md:mb-8">
-            <Sparkles className="w-4 h-4" />
-            Trusted by 5,000+ teams
+        <div className="text-center max-w-4xl mx-auto mb-10 sm:mb-16 md:mb-20 px-2">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs sm:text-sm font-medium mb-5 sm:mb-8">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Trusted by 5,000+ teams</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight text-slate-900 mb-4 md:mb-6 leading-[1.1]">
+          <h1 className="text-3xl sm:text-5xl md:text-7xl font-bold tracking-tight text-slate-900 mb-4 md:mb-6 leading-[1.15]">
             Smarter Inventory,<br />Greater Precision
           </h1>
-          <p className="text-base md:text-xl text-slate-500 mb-8 md:mb-10 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-sm sm:text-base md:text-xl text-slate-500 mb-6 sm:mb-10 max-w-2xl mx-auto leading-relaxed">
             Optimize stock levels, prevent shortages, cut excess inventory, and simplify your inventory management effortlessly.
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-xs sm:max-w-none mx-auto">
             <button 
               onClick={() => window.location.href = '/signup'}
-              className="w-full sm:w-auto bg-blue-600 text-white px-8 py-3.5 rounded-full text-base font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"
+              className="w-full sm:w-auto bg-blue-600 text-white px-7 py-3 rounded-full text-sm sm:text-base font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"
             >
               Get started
             </button>
-            <button className="w-full sm:w-auto bg-white text-slate-700 border border-slate-200 px-8 py-3.5 rounded-full text-base font-medium hover:bg-slate-50 transition-colors shadow-sm">
-              Contact Us
+            <button 
+              onClick={() => window.location.href = '/preview'}
+              className="w-full sm:w-auto bg-white text-slate-700 border border-slate-200 px-7 py-3 rounded-full text-sm sm:text-base font-semibold hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-2"
+            >
+              <Play className="w-4 h-4 fill-slate-600 text-slate-600" />
+              Preview Demo
             </button>
           </div>
         </div>
 
-        {/* Dashboard Mockup - decorative only */}
-        <div className="relative mx-auto max-w-6xl pointer-events-none select-none cursor-default">
-          {/* Fade out gradient at the bottom */}
-          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#FAFAFA] to-transparent z-20" />
+        {/* Dashboard Mockup - Perfectly Fitted SaaS Preview with ShineBorder */}
+        <div className="relative mx-auto max-w-6xl mt-4 mb-20">
+          {/* Subtle Ambient Glow */}
+          <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-500/20 via-indigo-500/20 to-purple-500/20 rounded-3xl blur-2xl opacity-70 -z-10" />
           
-          <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200/60 shadow-2xl overflow-hidden flex h-[420px] sm:h-[520px] md:h-[700px]">
-            {/* Sidebar - hidden on mobile */}
-            <div className="hidden sm:flex w-52 md:w-64 border-r border-slate-100 flex-col bg-white shrink-0">
-              <div className="p-6 flex items-center gap-2">
-                <LogoIcon />
-                <span className="font-bold text-xl tracking-tight text-slate-900">Inviq</span>
-                <button className="ml-auto text-slate-400 hover:text-slate-600">
-                  <PanelLeftClose className="w-5 h-5" />
-                </button>
+          <ShineBorder
+            borderRadius={24}
+            borderWidth={1.5}
+            duration={12}
+            color={["#60A5FA", "#38BDF8", "#818CF8", "#A78BFA"]}
+            className="w-full p-0 overflow-hidden shadow-2xl shadow-slate-900/10 rounded-2xl md:rounded-3xl border border-slate-200/80"
+          >
+            <div className="w-full bg-white overflow-hidden">
+              {/* macOS / Browser Top Chrome Bar */}
+              <div className="h-11 px-4 md:px-6 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-400/90" />
+                <div className="w-3 h-3 rounded-full bg-amber-400/90" />
+                <div className="w-3 h-3 rounded-full bg-emerald-400/90" />
               </div>
-              
-              <div className="flex-1 px-4 py-2 space-y-1 overflow-hidden">
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-medium text-sm border border-blue-100/50">
-                  <LayoutDashboard className="w-5 h-5" />
-                  Dashboard
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <Ship className="w-5 h-5" />
-                  Shipments
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <Box className="w-5 h-5" />
-                  Orders
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <Truck className="w-5 h-5" />
-                  Fleet Management
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <Users className="w-5 h-5" />
-                  Drivers
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <Layers className="w-5 h-5" />
-                  Inventory
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <BarChart3 className="w-5 h-5" />
-                  Report & Analytics
-                </button>
-                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium text-sm transition-colors">
-                  <CreditCard className="w-5 h-5" />
-                  Billing & Payments
-                </button>
+              <div className="flex items-center gap-2 px-4 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-500 font-mono shadow-xs">
+                <Lock className="w-3 h-3 text-emerald-500" />
+                <span>inviq.io/admin/dashboard</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Live Demo</span>
               </div>
             </div>
 
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col bg-[#FAFAFA] overflow-hidden">
-              {/* Top Nav */}
-              <div className="h-20 px-4 md:px-8 flex items-center justify-between bg-white border-b border-slate-100 shrink-0">
-                <h1 className="text-lg md:text-xl font-bold text-slate-900">Overview</h1>
-                
-                <div className="flex items-center gap-2 md:gap-4">
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="text" 
-                      placeholder="Search" 
-                      className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-32 md:w-64 shadow-sm"
-                      readOnly
-                    />
+            {/* Dashboard Interface Header */}
+            <div className="p-4 md:p-6 lg:p-8 bg-[#FAFAFA] space-y-5">
+              {/* Header Info */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/70 shadow-xs">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <span>Central Pharmacy & Warehouse Overview</span>
+                    <span className="text-xs px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-semibold border border-blue-100">v2.0</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Real-time stock levels, batch expiries, and cold-chain compliance</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-600">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <span>August 2026</span>
                   </div>
-                  <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs md:text-sm text-slate-600 shadow-sm">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    November 2024
-                  </div>
-                  <button className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-xl text-xs md:text-sm font-medium hover:bg-blue-700 shadow-sm shadow-blue-600/20">
-                    <Plus className="w-4 h-4" />
-                    <span className="hidden xs:inline">Add Shipment</span>
-                    <span className="xs:hidden">Add</span>
+                  <button 
+                    onClick={() => window.location.href = '/dashboard'}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs"
+                  >
+                    <Play className="w-3 h-3 fill-white" />
+                    <span>Launch App</span>
                   </button>
                 </div>
               </div>
 
-              {/* Dashboard Content */}
-              <div className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-8">
-                {/* 4 Stat Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 mb-3 md:mb-6">
-                  {/* Card 1 */}
-                  <div className="bg-white p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-red-50 flex items-center justify-center mb-3 sm:mb-4">
-                        <Ship className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
-                      </div>
-                      <div className="text-xs sm:text-sm font-medium text-slate-500 mb-1 truncate">Total Shipments</div>
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                        <span className="text-lg sm:text-2xl font-bold text-slate-900 leading-none">6,524</span>
-                        <span className="inline-flex items-center text-[10px] sm:text-xs font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100/50 shrink-0">
-                          <ArrowUpRight className="w-2.5 h-2.5 mr-0.5" /> 1.3%
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">vs Last Month</div>
+              {/* 4 KPI Metrics Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                {/* Metric 1 */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/70 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-500">Total Inventory</span>
+                    <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                      <Box className="w-4 h-4" />
                     </div>
                   </div>
-                  {/* Card 2 */}
-                  <div className="bg-white p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 flex items-center justify-center mb-3 sm:mb-4">
-                        <Box className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" />
-                      </div>
-                      <div className="text-xs sm:text-sm font-medium text-slate-500 mb-1 truncate">Total Order</div>
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                        <span className="text-lg sm:text-2xl font-bold text-slate-900 leading-none">25,342</span>
-                        <span className="inline-flex items-center text-[10px] sm:text-xs font-medium text-red-600 bg-red-50 px-1 py-0.5 rounded border border-red-100/50 shrink-0">
-                          <ArrowDownRight className="w-2.5 h-2.5 mr-0.5" /> 2.1%
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">vs Last Month</div>
-                    </div>
-                  </div>
-                  {/* Card 3 */}
-                  <div className="bg-white p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3 sm:mb-4">
-                        <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
-                      </div>
-                      <div className="text-xs sm:text-sm font-medium text-slate-500 mb-1 truncate">Revenue</div>
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                        <span className="text-lg sm:text-2xl font-bold text-slate-900 leading-none">₹2,14,535</span>
-                        <span className="inline-flex items-center text-[10px] sm:text-xs font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100/50 shrink-0">
-                          <ArrowUpRight className="w-2.5 h-2.5 mr-0.5" /> 1.3%
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">vs Last Month</div>
-                    </div>
-                  </div>
-                  {/* Card 4 */}
-                  <div className="bg-white p-3 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3 sm:mb-4">
-                        <Truck className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500" />
-                      </div>
-                      <div className="text-xs sm:text-sm font-medium text-slate-500 mb-1 truncate">Delivered</div>
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                        <span className="text-lg sm:text-2xl font-bold text-slate-900 leading-none">1,568</span>
-                        <span className="inline-flex items-center text-[10px] sm:text-xs font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100/50 shrink-0">
-                          <ArrowUpRight className="w-2.5 h-2.5 mr-0.5" /> 4.3%
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">vs Last Month</div>
+                  <div>
+                    <div className="text-xl md:text-2xl font-bold text-slate-900">12,840</div>
+                    <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 mt-1">
+                      <ArrowUpRight className="w-3 h-3" />
+                      <span>+4.2% this month</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Charts Row */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-6 mb-3 md:mb-6">
-                  {/* Line Chart */}
-                  <div className="col-span-1 lg:col-span-2 bg-white p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-4 md:mb-6">
-                      <h3 className="font-bold text-slate-900">Shipment Analytics</h3>
-                      <div className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 rounded-lg text-xs md:text-sm text-slate-600 cursor-pointer">
-                        <Calendar className="w-4 h-4" />
-                        Monthly
-                        <ChevronDown className="w-4 h-4 ml-1" />
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-4 md:gap-6 mb-6 md:mb-8">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] sm:text-xs text-slate-500">Total Delivery:</span>
-                        <span className="font-bold text-xs sm:text-sm text-slate-900">343,245</span>
-                        <span className="flex items-center text-[10px] sm:text-xs font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
-                          <ArrowUpRight className="w-2.5 h-2.5 mr-0.5" /> 1.3%
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] sm:text-xs text-slate-500">On Delivery:</span>
-                        <span className="font-bold text-xs sm:text-sm text-slate-900">2,162</span>
-                        <span className="flex items-center text-[10px] sm:text-xs font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
-                          <ArrowUpRight className="w-2.5 h-2.5 mr-0.5" /> 4.25%
-                        </span>
-                      </div>
-                    </div>
-                    {/* SVG Line Chart Mockup */}
-                    <div className="h-48 w-full relative">
-                      {/* Grid lines */}
-                      <div className="absolute inset-0 flex flex-col justify-between">
-                        {[4000, 3000, 2000, 1000, 500, 100, 0].map((val, i) => (
-                          <div key={i} className="flex items-center w-full">
-                            <span className="text-[10px] text-slate-400 w-8 text-right mr-4">{val}</span>
-                            <div className="flex-1 border-b border-slate-100 border-dashed"></div>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Lines */}
-                      <svg className="absolute inset-0 w-full h-full pl-12 pt-2" preserveAspectRatio="none" viewBox="0 0 100 100">
-                        {/* Dashed Line */}
-                        <path d="M 0 60 Q 15 70, 25 80 T 50 60 T 75 60 T 100 50" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="4 4" />
-                        {/* Solid Line */}
-                        <path d="M 0 80 Q 15 90, 25 85 T 45 50 T 65 70 T 85 60 T 100 40" fill="none" stroke="#2563eb" strokeWidth="2" />
-                        
-                        {/* Tooltip point */}
-                        <circle cx="45" cy="50" r="3" fill="white" stroke="#2563eb" strokeWidth="2" />
-                      </svg>
-                      {/* Tooltip */}
-                      <div className="absolute top-10 left-[40%] bg-white border border-slate-200 shadow-lg rounded-lg p-3 text-xs z-10">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
-                          <span className="text-slate-500">Delivery:</span>
-                          <span className="font-semibold text-slate-900">120</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-600"></div>
-                          <span className="text-slate-500">On Delivery:</span>
-                          <span className="font-semibold text-slate-900">343</span>
-                        </div>
-                      </div>
-                      {/* X Axis */}
-                      <div className="absolute bottom-0 left-12 right-0 flex justify-between text-[10px] text-slate-400 translate-y-6">
-                        <span>Nov 1</span><span>Nov 2</span><span>Nov 3</span><span>Nov 4</span><span>Nov 5</span><span>Nov 6</span><span>Nov 7</span><span>Nov 8</span><span>Nov 9</span>
-                      </div>
+                {/* Metric 2 */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/70 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-500">Cold-Chain Vaccines</span>
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+                      <Activity className="w-4 h-4" />
                     </div>
                   </div>
-
-                  {/* Bar Chart */}
-                  <div className="bg-white p-4 md:p-6 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="font-bold text-slate-900">Cashflow Stat</h3>
-                      <button className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">
-                        Export <Download className="w-3 h-3" />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-4 mb-8 text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-4 rounded-full bg-blue-600"></div>
-                        <span className="text-slate-500">Income</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-4 rounded-full bg-blue-200"></div>
-                        <span className="text-slate-500">Expense</span>
-                      </div>
-                    </div>
-                    {/* Bar Chart Mockup */}
-                    <div className="h-48 flex items-end justify-between gap-2">
-                      {[
-                        { in: 30, out: 10, label: 'Nov 1' },
-                        { in: 50, out: 20, label: 'Nov 2' },
-                        { in: 80, out: 30, label: 'Nov 3' },
-                        { in: 60, out: 25, label: 'Nov 4' },
-                        { in: 45, out: 15, label: 'Nov 5' },
-                        { in: 35, out: 10, label: 'Nov 6' },
-                        { in: 40, out: 12, label: 'Nov 7' },
-                      ].map((col, i) => (
-                        <div key={i} className="flex flex-col items-center flex-1 gap-2 h-full">
-                          <div className="w-full flex flex-col justify-end items-center h-full gap-1">
-                            <div className="w-3/4 bg-blue-200 rounded-t-sm" style={{ height: `${col.out}%` }}></div>
-                            <div className="w-3/4 bg-blue-600 rounded-t-sm" style={{ height: `${col.in}%` }}></div>
-                          </div>
-                          <span className="text-[10px] text-slate-400">{col.label}</span>
-                        </div>
-                      ))}
+                  <div>
+                    <div className="text-xl md:text-2xl font-bold text-slate-900">1,840 <span className="text-xs font-normal text-slate-400">vials</span></div>
+                    <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 mt-1">
+                      <Check className="w-3 h-3" />
+                      <span>3.4°C (Safe 2°–8°C)</span>
                     </div>
                   </div>
                 </div>
 
+                {/* Metric 3 */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/70 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-500">Critical Shortages</span>
+                    <div className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center text-red-600">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xl md:text-2xl font-bold text-slate-900">12 <span className="text-xs font-normal text-slate-400">items</span></div>
+                    <div className="flex items-center gap-1 text-[11px] font-medium text-red-600 mt-1">
+                      <span>Restock suggested</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metric 4 */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/70 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-500">Requisitions</span>
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+                      <Truck className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xl md:text-2xl font-bold text-slate-900">28 Active</div>
+                    <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 mt-1">
+                      <span>96% on-time fulfillment</span>
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {/* Middle Section: Chart & Category Distribution */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
+                {/* Stock Movement Trends (2 cols) */}
+                <div className="lg:col-span-2 bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">Stock Consumption & Fulfillment</h4>
+                      <p className="text-[11px] text-slate-400">Weekly inbound vs outbound pharmaceutical units</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-blue-600" />
+                        <span className="text-slate-600 font-medium">Inbound</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-sm bg-indigo-200" />
+                        <span className="text-slate-600 font-medium">Outbound</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Clean SVG Trend Visualization */}
+                  <div className="h-36 w-full relative pt-2">
+                    <svg className="w-full h-full" viewBox="0 0 400 120" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="blueGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.25" />
+                          <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      {/* Grid Lines */}
+                      <line x1="0" y1="30" x2="400" y2="30" stroke="#F1F5F9" strokeDasharray="3 3" />
+                      <line x1="0" y1="60" x2="400" y2="60" stroke="#F1F5F9" strokeDasharray="3 3" />
+                      <line x1="0" y1="90" x2="400" y2="90" stroke="#F1F5F9" strokeDasharray="3 3" />
+                      
+                      {/* Area Fill */}
+                      <path d="M 0 90 Q 60 40, 120 65 T 240 35 T 340 50 L 400 30 L 400 120 L 0 120 Z" fill="url(#blueGradient)" />
+                      {/* Trend Curve */}
+                      <path d="M 0 90 Q 60 40, 120 65 T 240 35 T 340 50 L 400 30" fill="none" stroke="#3B82F6" strokeWidth="2.5" strokeLinecap="round" />
+                      {/* Outbound Dashed Curve */}
+                      <path d="M 0 105 Q 60 75, 120 90 T 240 60 T 340 75 L 400 55" fill="none" stroke="#94A3B8" strokeWidth="2" strokeDasharray="4 4" strokeLinecap="round" />
+                      
+                      {/* Highlight Data Points */}
+                      <circle cx="240" cy="35" r="4" fill="#3B82F6" stroke="#FFFFFF" strokeWidth="2" />
+                      <circle cx="400" cy="30" r="4" fill="#3B82F6" stroke="#FFFFFF" strokeWidth="2" />
+                    </svg>
+                    {/* X-Axis Labels */}
+                    <div className="flex justify-between text-[10px] text-slate-400 mt-1 px-1">
+                      <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Categories & Storage Breakdown (1 col) */}
+                <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 mb-1">Category Breakdown</h4>
+                    <p className="text-[11px] text-slate-400 mb-3">Live allocation across storage types</p>
+                    
+                    <div className="space-y-2.5 text-xs">
+                      <div>
+                        <div className="flex justify-between text-slate-600 mb-1">
+                          <span className="font-medium">Antibiotics & Oral</span>
+                          <span className="text-slate-400 font-mono">42%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full" style={{ width: '42%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-slate-600 mb-1">
+                          <span className="font-medium">Vaccines (Cold-Chain)</span>
+                          <span className="text-slate-400 font-mono">24%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-indigo-500 rounded-full" style={{ width: '24%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-slate-600 mb-1">
+                          <span className="font-medium">Cardiovascular & IV</span>
+                          <span className="text-slate-400 font-mono">20%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: '20%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-slate-600 mb-1">
+                          <span className="font-medium">Analgesics & Pain Relief</span>
+                          <span className="text-slate-400 font-mono">14%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-500 rounded-full" style={{ width: '14%' }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Active Locations: <strong>4 Sites</strong></span>
+                    <span className="text-blue-600 font-medium cursor-pointer hover:underline">View Map →</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Row: Live Stock Table */}
+              <div className="bg-white rounded-2xl border border-slate-200/70 shadow-xs overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <span className="text-xs font-bold text-slate-900">Recent Inventory Batches</span>
+                  <span className="text-[11px] text-slate-500 font-medium">Showing 4 of 960 records</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-slate-400 font-medium text-[11px]">
+                        <th className="py-2.5 px-4">Medicine / Item</th>
+                        <th className="py-2.5 px-4">Batch No.</th>
+                        <th className="py-2.5 px-4">Location</th>
+                        <th className="py-2.5 px-4">Stock</th>
+                        <th className="py-2.5 px-4">Expiry</th>
+                        <th className="py-2.5 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      <tr>
+                        <td className="py-2.5 px-4 font-medium text-slate-900">Amoxicillin 500mg</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">AMX-2026-08</td>
+                        <td className="py-2.5 px-4">Pharmacy Wing A</td>
+                        <td className="py-2.5 px-4 font-semibold text-red-600">15 strips</td>
+                        <td className="py-2.5 px-4 text-slate-500">Apr 2027</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-50 text-red-700 border border-red-100">
+                            Critical
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4 font-medium text-slate-900">Hepatitis B Vaccine</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">HEPB-2026-09</td>
+                        <td className="py-2.5 px-4">Cold-Storage Hub</td>
+                        <td className="py-2.5 px-4 font-semibold text-slate-900">45 vials</td>
+                        <td className="py-2.5 px-4 text-slate-500">Oct 2026</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            Cold-Chain Safe
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4 font-medium text-slate-900">Paracetamol IV 100ml</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">PCM-2026-02</td>
+                        <td className="py-2.5 px-4">Central Warehouse</td>
+                        <td className="py-2.5 px-4 font-semibold text-amber-600">22 bottles</td>
+                        <td className="py-2.5 px-4 text-slate-500">Jan 2027</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-100">
+                            Low Stock
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4 font-medium text-slate-900">Atorvastatin 20mg</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500 text-[11px]">ATV-2026-05</td>
+                        <td className="py-2.5 px-4">Central Warehouse</td>
+                        <td className="py-2.5 px-4 font-semibold text-emerald-600">310 strips</td>
+                        <td className="py-2.5 px-4 text-slate-500">Nov 2027</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                            Healthy
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           </div>
-        </div>
+        </ShineBorder>
+      </div>
         
-        {/* Footer Text */}
+      {/* Footer Text */}
         <div className="mt-12 text-center text-sm font-medium text-slate-500">
           Companies that trust Inviq to build what's next:
         </div>
@@ -603,8 +685,16 @@ export default function Landing() {
         </div>
 
         {/* Pricing Section */}
-        <div id="pricing" className="py-32 border-t border-slate-200/60">
-          <div className="text-center max-w-3xl mx-auto mb-16">
+        <div id="pricing" className="py-32 border-t border-slate-200/60 relative overflow-hidden">
+          <DotPattern
+            width={12}
+            height={12}
+            cx={1}
+            cy={1}
+            cr={1.2}
+            className="[mask-image:radial-gradient(800px_circle_at_center,white,transparent)] fill-slate-400/55"
+          />
+          <div className="relative z-10 text-center max-w-3xl mx-auto mb-16">
             <div className="inline-flex items-center justify-center px-4 py-1.5 rounded-full bg-cyan-50 text-cyan-500 text-xs font-semibold mb-6 relative">
               {/* Decorative lines */}
               <div className="absolute top-1/2 -left-4 w-4 h-px bg-cyan-100" />
@@ -619,7 +709,7 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+          <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
             {/* Starter Plan */}
             <div className="flex flex-col">
               <div className="bg-gradient-to-b from-slate-50 to-slate-50/50 rounded-[2rem] p-8 mb-8 relative overflow-hidden border border-slate-100/50">
@@ -754,10 +844,18 @@ export default function Landing() {
         </div>
 
         {/* Customers Section */}
-        <div id="customers" className="py-32 border-t border-slate-200/60 relative bg-white">
+        <div id="customers" className="py-32 border-t border-slate-200/60 relative bg-white overflow-hidden">
+          <DotPattern
+            width={12}
+            height={12}
+            cx={1}
+            cy={1}
+            cr={1.2}
+            className="[mask-image:radial-gradient(800px_circle_at_center,white,transparent)] fill-indigo-400/45"
+          />
           {/* Vertical lines matching the design */}
-          <div className="hidden md:block absolute top-0 bottom-0 left-[10%] w-px bg-indigo-100/50" />
-          <div className="hidden md:block absolute top-0 bottom-0 right-[10%] w-px bg-indigo-100/50" />
+          <div className="hidden md:block absolute top-0 bottom-0 left-[10%] w-px bg-indigo-100/50 pointer-events-none" />
+          <div className="hidden md:block absolute top-0 bottom-0 right-[10%] w-px bg-indigo-100/50 pointer-events-none" />
 
           <div className="text-center max-w-3xl mx-auto mb-12 relative z-10">
             <h2 className="text-4xl md:text-5xl font-medium text-slate-900 mb-4 tracking-tight">
@@ -904,14 +1002,14 @@ export default function Landing() {
         {/* Footer Links */}
         <footer className="bg-white pt-20 pb-10 border-t border-slate-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 mb-16">
-              <div className="lg:col-span-2">
-                <div className="flex items-center gap-2 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-16">
+              <div className="col-span-2">
+                <div className="flex items-center gap-2 mb-4">
                   <LogoIcon />
-                  <span className="font-semibold text-xl tracking-tight text-slate-900">Inviq</span>
+                  <span className="font-bold text-xl tracking-tight text-slate-900">InvIQ</span>
                 </div>
-                <p className="text-slate-500 leading-relaxed max-w-sm">
-                  We're here to help businesses evolve through tailored development, smart systems, and lasting impact.
+                <p className="text-slate-500 text-sm max-w-sm mb-6 leading-relaxed">
+                  Next-generation smart inventory management with real-time tracking, AI-powered forecasting, and cold-chain compliance.
                 </p>
               </div>
               

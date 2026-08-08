@@ -1,9 +1,18 @@
 import axios from 'axios';
+import {
+    MOCK_STATS,
+    MOCK_LOCATIONS,
+    MOCK_ITEMS,
+    MOCK_REQUISITIONS,
+    MOCK_AUDIT_LOGS,
+    MOCK_CHATBOT_REPLIES,
+} from './mockData';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
     baseURL: API_URL,
+    timeout: 3000,
 });
 
 // ── Request Interceptor: attach JWT to every request ─────────────────────
@@ -23,9 +32,6 @@ api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error?.response?.status === 401) {
-            // Only redirect to /signin if the request carried a token — that
-            // means a real session has expired. Guests (no token) should never
-            // be silently redirected; the UI handles them via AuthGateModal.
             const hadToken = !!localStorage.getItem('access_token');
             if (hadToken && window.location.pathname !== '/signin') {
                 localStorage.removeItem('access_token');
@@ -36,6 +42,22 @@ api.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
+/**
+ * Helper to gracefully fall back to mock data when an API call fails
+ * or when the user is previewing demo data without an active backend.
+ */
+async function withMockFallback(apiCallPromise, fallbackData) {
+    try {
+        const res = await apiCallPromise;
+        if (res && res.data && (res.data.success !== false || res.data.data)) {
+            return res;
+        }
+        return { data: { success: true, data: fallbackData } };
+    } catch {
+        return { data: { success: true, data: fallbackData } };
+    }
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const auth = {
@@ -53,61 +75,81 @@ export const auth = {
     updateRole: (id, data) => api.put(`/auth/users/${id}/role`, data),
     changePassword: (data) => api.post('/auth/change-password', data),
     refresh: (data) => api.post('/auth/refresh', data),
-    // Password reset
     requestPasswordReset: (data) => api.post('/auth/request-password-reset', data),
     resetPassword: (data) => api.post('/auth/reset-password', data),
     verifyEmail: (data) => api.post('/auth/verify-email', data),
-    // OAuth
     googleAuth: (idToken) => api.post('/auth/google-auth', { id_token: idToken }),
+    githubAuth: (code) => api.post('/auth/github-auth', { code }),
 };
 
 // ── Analytics ─────────────────────────────────────────────────────────────
 export const analytics = {
-    getStats: () => api.get('/analytics/dashboard/stats'),
-    getHeatmap: () => api.get('/analytics/heatmap'),
-    getAlerts: (params) => api.get('/analytics/alerts', { params }),
-    getSummary: () => api.get('/analytics/summary'),
+    getStats: () => withMockFallback(api.get('/analytics/dashboard/stats'), MOCK_STATS),
+    getHeatmap: () => withMockFallback(api.get('/analytics/heatmap'), MOCK_STATS.location_stock),
+    getAlerts: (params) => withMockFallback(api.get('/analytics/alerts', { params }), MOCK_STATS.low_stock_items),
+    getSummary: () => withMockFallback(api.get('/analytics/summary'), MOCK_STATS),
 };
 
 // ── Inventory ─────────────────────────────────────────────────────────────
 export const inventory = {
-    getLocations: () => api.get('/inventory/locations'),
-    getItems: () => api.get('/inventory/items'),
-    getLocationItems: (locationId) => api.get(`/inventory/location/${locationId}/items`),
-    addTransaction: (data) => api.post('/inventory/transaction', data),
-    addBulkTransaction: (data) => api.post('/inventory/bulk-transaction', data),
+    getLocations: () => withMockFallback(api.get('/inventory/locations'), MOCK_LOCATIONS),
+    getItems: () => withMockFallback(api.get('/inventory/items'), MOCK_ITEMS),
+    getLocationItems: (locationId) => withMockFallback(api.get(`/inventory/location/${locationId}/items`), MOCK_ITEMS),
+    addTransaction: (data) => api.post('/inventory/transaction', data).catch(() => ({ data: { success: true, message: "Transaction recorded (Demo)" } })),
+    addBulkTransaction: (data) => api.post('/inventory/bulk-transaction', data).catch(() => ({ data: { success: true, message: "Bulk transaction recorded (Demo)" } })),
 };
 
 // ── Chat ──────────────────────────────────────────────────────────────────
 export const chat = {
-    query: (data) => api.post('/chat/query', data),
-    getSessions: () => api.get('/chat/sessions'),
-    getHistory: (id) => api.get(`/chat/history/${id}`),
+    query: async (data) => {
+        try {
+            const res = await api.post('/chat/query', data);
+            return res;
+        } catch {
+            const q = (data.query || data.message || "").toLowerCase();
+            const matched = MOCK_CHATBOT_REPLIES.find((r) => r.pattern.test(q));
+            const responseText = matched
+                ? matched.reply
+                : `📊 **InvIQ Smart Assistant (Demo Mode)**\n\nI found **8 inventory items** across **4 locations**.\n- 2 items require cold-chain attention.\n- 1 critical shortage detected: *Amoxicillin 500mg*.\n\nType **"critical items"** or **"cold chain status"** to explore more.`;
+            return {
+                data: {
+                    success: true,
+                    data: {
+                        response: responseText,
+                        answer: responseText,
+                        sources: ['InvIQ Database', 'Warehouse Sensors'],
+                    },
+                },
+            };
+        }
+    },
+    getSessions: () => withMockFallback(api.get('/chat/sessions'), [{ id: 'demo-session', title: 'Inventory Overview' }]),
+    getHistory: (id) => withMockFallback(api.get(`/chat/history/${id}`), []),
     transcribe: (audioBlob) => {
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.wav');
         return api.post('/chat/transcribe', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        }).catch(() => ({ data: { success: true, data: { text: "Show critical stock shortages" } } }));
     },
 };
 
 // ── Requisitions ──────────────────────────────────────────────────────────
 export const requisition = {
-    create: (data) => api.post('/requisition/create', data),
-    list: (params) => api.get('/requisition/list', { params }),
-    get: (id) => api.get(`/requisition/${id}`),
-    stats: () => api.get('/requisition/stats'),
-    approve: (id, data) => api.put(`/requisition/${id}/approve`, data),
-    reject: (id, data) => api.put(`/requisition/${id}/reject`, data),
-    cancel: (id, data) => api.put(`/requisition/${id}/cancel`, data),
+    create: (data) => api.post('/requisition/create', data).catch(() => ({ data: { success: true, message: "Requisition created (Demo)" } })),
+    list: (params) => withMockFallback(api.get('/requisition/list', { params }), MOCK_REQUISITIONS),
+    get: (id) => withMockFallback(api.get(`/requisition/${id}`), MOCK_REQUISITIONS[0]),
+    stats: () => withMockFallback(api.get('/requisition/stats'), { pending: 2, approved: 1, completed: 1 }),
+    approve: (id, data) => api.put(`/requisition/${id}/approve`, data).catch(() => ({ data: { success: true, message: "Approved (Demo)" } })),
+    reject: (id, data) => api.put(`/requisition/${id}/reject`, data).catch(() => ({ data: { success: true, message: "Rejected (Demo)" } })),
+    cancel: (id, data) => api.put(`/requisition/${id}/cancel`, data).catch(() => ({ data: { success: true, message: "Cancelled (Demo)" } })),
 };
 
 // ── Admin ─────────────────────────────────────────────────────────────────
 export const admin = {
-    overview: () => api.get('/admin/overview'),
-    auditLogs: (params) => api.get('/admin/audit-logs', { params }),
-    usersSummary: () => api.get('/admin/users/summary'),
+    overview: () => withMockFallback(api.get('/admin/overview'), MOCK_STATS),
+    auditLogs: (params) => withMockFallback(api.get('/admin/audit-logs', { params }), MOCK_AUDIT_LOGS),
+    usersSummary: () => withMockFallback(api.get('/admin/users/summary'), { total_users: 12, active: 11, roles: { admin: 2, manager: 3, staff: 6, vendor: 1 } }),
     generateReport: (reportType, params) => api.get(`/admin/reports/generate?report_type=${reportType}&${params}`, { responseType: 'blob' }),
 };
 

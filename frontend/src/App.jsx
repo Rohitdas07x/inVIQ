@@ -29,9 +29,10 @@ import { LightSignUp } from './components/ui/sign-up';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
 import VerifyEmail from './pages/auth/VerifyEmail';
+import PreviewDashboard from './pages/preview/PreviewDashboard';
 
 /**
- * Role → home-page map. Viewer role removed — guests access /admin/* freely.
+ * Role → home-page map.
  */
 const ROLE_HOME = {
   super_admin: '/superadmin/dashboard',
@@ -41,10 +42,10 @@ const ROLE_HOME = {
   vendor:      '/vendor',
 };
 
-/** Redirect authenticated users to their correct home page. */
+/** Redirect authenticated users to their correct home page, and guests to standalone preview. */
 function RoleRedirect() {
   const { user } = useAuth();
-  const home = user ? (ROLE_HOME[user.role] || '/admin/dashboard') : '/admin/dashboard';
+  const home = user ? (ROLE_HOME[user.role] || '/admin/dashboard') : '/preview';
   return <Navigate to={home} replace />;
 }
 
@@ -62,6 +63,8 @@ function AppContent() {
         <Routes>
           {/* ── Public pages ──────────────────────────────────────── */}
           <Route path="/"               element={<Landing />} />
+          <Route path="/preview"        element={<PreviewDashboard />} />
+          <Route path="/demo"           element={<PreviewDashboard />} />
           <Route path="/signin"         element={<LightSignIn />} />
           <Route path="/signup"         element={<LightSignUp />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -145,13 +148,48 @@ function AppContent() {
   );
 }
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('App Caught Error:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#FAFAFA] text-slate-900 flex flex-col items-center justify-center p-6 text-center">
+          <img src="/logo.png" alt="InvIQ Logo" className="w-16 h-16 object-contain mb-4" />
+          <h2 className="text-2xl font-bold mb-2">InvIQ Smart Inventory</h2>
+          <p className="text-slate-500 text-sm max-w-md mb-6">
+            An unexpected error occurred. Click below to return to the home page.
+          </p>
+          <button
+            onClick={() => { localStorage.clear(); window.location.href = '/'; }}
+            className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 shadow-md shadow-blue-500/20 transition-all"
+          >
+            Reload Home Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
