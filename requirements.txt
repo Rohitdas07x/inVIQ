@@ -41,7 +41,6 @@ langgraph>=1.1.10
 
 # -- Vector Store & Embeddings ----------------------------------------------
 qdrant-client>=1.9.0
-sentence-transformers>=3.0.0
 
 # -- Voice / Speech-to-Text -------------------------------------------------
 sarvamai>=0.1.28               # Sarvam AI — saaras:v3 STT

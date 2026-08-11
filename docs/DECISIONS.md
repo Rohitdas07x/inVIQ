@@ -210,3 +210,13 @@ Each entry records *why* a choice was made — the code itself shows *what* was 
 - **Alternatives considered**: Rule-based regex only — breaks whenever vendors use unexpected synonyms or different languages. Full LLM row processing — dangerous, slow, expensive, and non-deterministic. Manual-only mapping UI — high friction for users on every upload.
 - **Tradeoff accepted**: Confidence gating quarantines rows when header naming confidence is below configured threshold (0.90 for high-risk fields, 0.70 for standard fields). Users can inspect quarantined rows with exact failure reasons in the quarantine table.
 
+---
+
+## Google Gemini Embeddings (`gemini-embedding-001`) over local SentenceTransformers
+
+- **What**: Switched vector memory embedding generator from local PyTorch `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) to Google Gemini Embeddings API (`gemini-embedding-001`, 768-dim) via HTTP REST.
+- **Why**: The local `sentence-transformers` package required PyTorch and large binary model weights (~1.5GB+ disk and heavy CPU/RAM overhead on server startup). Replacing it with Gemini API eliminates heavy local ML dependencies, drops build times, drastically reduces Docker container size, and provides higher semantic accuracy.
+- **Alternatives considered**: Local `all-MiniLM-L6-v2` with ONNX runtime — still requires bundling model weights in the container. OpenAI `text-embedding-3-small` — adds another vendor dependency when Google ecosystem is already integrated.
+- **Tradeoff accepted**: Embeddings now require an outbound HTTPS call to Google's Generative Language API (`GEMINI_API_KEY`), adding minor network latency (~50-100ms) during vector upsert and query search.
+
+

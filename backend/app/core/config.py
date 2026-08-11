@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 1024
 
+    # ── Gemini (Embeddings for Vector Memory) ───────────────────────────
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
+    GEMINI_EMBEDDING_DIM: int = 768
+
     # ── LangSmith (Observability) ──────────────────────────────────────
     LANGCHAIN_API_KEY: Optional[str] = None
     LANGCHAIN_PROJECT: str = "InvIQ"

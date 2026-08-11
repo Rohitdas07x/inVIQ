@@ -335,7 +335,7 @@ api/routes/chat.py:chat_query
       → [if DB empty] return early with onboarding message
       → chat.py:_get_vector_context
           → infrastructure/vector_store/vector_store.py:get_vector_memory   (singleton)
-          → VectorMemory.search_relevant → sentence_transformers embed → qdrant_client.query_points   EXTERNAL CALL: Qdrant Cloud
+          → VectorMemory.search_relevant → Google Gemini Embeddings API (gemini-embedding-001) → qdrant_client.query_points   EXTERNAL CALL: Gemini API + Qdrant Cloud
       → [if conversation_id] chat.py:_get_conversation_history   (DB SELECT chat_messages)
       → application/agent_service.py:is_agent_available
           → [if _agent is None and GROQ_API_KEY set] agent_service.py:_build_agent
@@ -356,11 +356,12 @@ api/routes/chat.py:chat_query
   → [new conversation] DB INSERT chat_sessions
   → DB INSERT chat_messages (user + assistant)
   → DB COMMIT
-  → VectorMemory.add_message × 2   EXTERNAL CALL: Qdrant Cloud (async background, fire-and-forget via try/except)
+  → VectorMemory.add_message × 2   EXTERNAL CALL: Gemini Embeddings API + Qdrant Cloud (async background, fire-and-forget via try/except)
 ```
 
 **Branches**:
 - `GROQ_API_KEY` not set → agent never built; falls to rule-based immediately
+- `GEMINI_API_KEY` not set → vector search skipped, chat continues without RAG context
 - Agent timeout after 30s → `RuntimeError` → falls to rule-based response
 - Groq 401 (key expired) → agent singleton reset to None → RuntimeError → rule-based
 - Qdrant unavailable → `_get_vector_context` returns `""` (no context), chat continues without memory
