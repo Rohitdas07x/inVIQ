@@ -16,6 +16,7 @@ from app.core.rate_limiter import limiter
 from app.core.exceptions import ValidationError, AuthorizationError
 from app.infrastructure.database.models import User, Location
 from app.application.vendor_service import VendorService
+from app.application.cache_service import cache_invalidate_pattern
 
 logger = logging.getLogger("smart_inventory.vendor")
 
@@ -103,6 +104,10 @@ def upload_delivery(
         vendor_user_id=current_user.id,
         org_id=current_user.org_id,
     )
+
+    # Invalidate analytics cache so dashboards reflect newly delivered stock
+    if result.get("success"):
+        cache_invalidate_pattern("analytics:*")
 
     return result
 

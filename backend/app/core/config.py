@@ -153,6 +153,31 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str = ""
     SARVAM_API_KEY: str = ""
 
+    # ── Data Import (AI-powered CSV/Excel column mapping) ──────────────
+    # Confidence threshold applied to most mapped fields (0.0–1.0).
+    # Rows/fields below this score are quarantined, never auto-written.
+    IMPORT_DEFAULT_CONFIDENCE: float = 0.70
+
+    # Stricter threshold for high-risk fields: item identity, location,
+    # date, and batch number — errors here cause patient-safety issues.
+    IMPORT_HIGH_RISK_CONFIDENCE: float = 0.90
+
+    # Files with <= this many data rows are processed synchronously within
+    # the HTTP request. Files above this are handed to a daemon thread.
+    # Derived from vendor upload behaviour (all rows, ~5 ms each, 500 * 5 ms = 2.5 s).
+    IMPORT_SYNC_ROW_LIMIT: int = 500
+
+    # How many rows to send as sample to the LLM for column-mapping.
+    # Never the full dataset — only headers + sample reach the LLM.
+    IMPORT_SAMPLE_ROWS: int = 3
+
+    # TTL (seconds) for cached LLM mapping results, keyed by header hash.
+    # 24 hours: identical file formats reuse the mapping without re-calling Groq.
+    IMPORT_MAPPING_CACHE_TTL: int = 86400
+
+    # Number of rows written per DB commit during row processing.
+    IMPORT_BATCH_SIZE: int = 50
+
     # ── Derived helpers ────────────────────────────────────────────────
 
     @property

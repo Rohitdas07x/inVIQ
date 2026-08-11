@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.routes import analytics, chat, inventory, requisition, auth, admin
 from app.api.routes import superadmin as superadmin_routes
 from app.api.routes import vendor as vendor_routes
+from app.api.routes import data_import as data_import_routes
 from app.api.routes.websocket import router as ws_router
 from app.api.graphql.schema import graphql_router
 from app.core.config import settings, configure_langsmith
@@ -116,6 +117,7 @@ app.include_router(requisition.router, prefix=settings.API_V1_PREFIX)
 app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 app.include_router(superadmin_routes.router, prefix=settings.API_V1_PREFIX)
 app.include_router(vendor_routes.router, prefix=settings.API_V1_PREFIX)
+app.include_router(data_import_routes.router, prefix=settings.API_V1_PREFIX)
 app.include_router(ws_router)
 
 # ── GraphQL (analytics reads only — REST handles all mutations) ────────────

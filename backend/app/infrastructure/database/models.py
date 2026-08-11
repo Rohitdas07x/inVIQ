@@ -8,6 +8,8 @@ from sqlalchemy import (
     TIMESTAMP,
     Boolean,
     JSON,
+    Float,
+    LargeBinary,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -197,7 +199,7 @@ class RequisitionItem(Base):
     item = relationship("Item")
 
 
-# ── Vendor Uploads (NEW) ─────────────────────────────────────────────────
+# ── Vendor Uploads ────────────────────────────────────────────────────────
 
 class VendorUpload(Base):
     """Tracks Excel delivery uploads by vendors."""
@@ -237,3 +239,72 @@ class AuditLog(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     user = relationship("User")
+
+
+# ── Data Import ───────────────────────────────────────────────────────────
+
+class DataImportJob(Base):
+    """
+    Tracks every CSV/Excel import job (synchronous or background).
+
+    Design: raw file bytes are stored here (≤ 5 MB per the upload limit)
+    so the confirm step can re-read the file without requiring re-upload.
+    Jobs in PENDING status older than 24 h can be cleaned up in a maintenance task.
+    """
+    __tablename__ = "data_import_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    filename = Column(String(255), nullable=False)
+    target_entity = Column(String(50), nullable=False)  # inventory_transaction | item | location
+
+    # Status lifecycle: PENDING → MAPPING → PROCESSING → COMPLETED | FAILED | PARTIAL
+    status = Column(String(20), nullable=False, default="PENDING", index=True)
+
+    total_rows = Column(Integer, nullable=True)
+    success_rows = Column(Integer, nullable=False, default=0)
+    quarantined_rows = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+
+    # AI-produced column mapping (JSON) stored for user review/edit before confirmation
+    mapping_result = Column(JSON, nullable=True)
+    mapping_cache_hit = Column(Boolean, default=False)
+
+    # Raw file bytes stored so the confirm step doesn't need a second upload
+    file_content = Column(LargeBinary, nullable=True)
+
+    is_background = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    uploaded_by = relationship("User")
+    quarantine_rows = relationship(
+        "ImportQuarantineRow",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+
+
+class ImportQuarantineRow(Base):
+    """
+    Every row rejected during import is written here — never silently dropped.
+
+    Reasons:
+      LOW_CONFIDENCE   — AI mapping confidence below threshold for a required field
+      VALIDATION_ERROR — type coercion failed or value out of range
+      MISSING_REQUIRED — a required target field could not be mapped or was empty
+      DB_ERROR         — row passed validation but the DB write raised an exception
+    """
+    __tablename__ = "import_quarantine_rows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("data_import_jobs.id"), nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)   # 1-indexed, matches spreadsheet row
+    raw_data = Column(JSON, nullable=False)         # original row as {column: value}
+    reason = Column(String(30), nullable=False)     # LOW_CONFIDENCE | VALIDATION_ERROR | MISSING_REQUIRED | DB_ERROR
+    field_name = Column(String(100), nullable=True) # which field triggered the quarantine
+    confidence_score = Column(Float, nullable=True) # AI confidence score (for LOW_CONFIDENCE rows)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    job = relationship("DataImportJob", back_populates="quarantine_rows")
