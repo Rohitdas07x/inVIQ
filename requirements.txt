@@ -53,6 +53,9 @@ pydantic-settings>=2.1.0
 openpyxl>=3.1.2                # Excel manifest uploads (vendor flow)
 reportlab>=4.0.7               # PDF report generation
 
+# -- Cloud & Blob Storage ---------------------------------------------------
+azure-storage-blob>=12.20.0    # Azure Blob Storage for invoices & documents
+
 # -- HTTP Client ------------------------------------------------------------
 # Single HTTP client: httpx covers both sync and async use-cases.
 # requests has been removed — migrate any remaining calls to httpx.

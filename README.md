@@ -130,43 +130,124 @@ docker-compose up -d
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ System Architecture
 
+```mermaid
+graph TB
+    subgraph ClientLayer["🖥️ Client Layer (React 19 SPA)"]
+        Landing["🌐 Landing & Guest Demo Portal"]
+        AuthApp["🔐 Login & Auth Portal"]
+        AdminPort["🛡️ Admin & Super Admin Dashboard"]
+        MgrPort["📈 Manager Portal & Analytics"]
+        StaffPort["📦 Staff Stock & Requisition Portal"]
+        VendorPort["🚚 Vendor Manifest Portal"]
+    end
+
+    subgraph APIGateway["🚪 API Gateway Layer (FastAPI)"]
+        CORS["CORS & Security Middleware"]
+        Limiter["SlowAPI Distributed Rate Limiter"]
+        AuthMid["JWT & Guest Token Verifier"]
+        REST["REST API Endpoints (56+ Routes)"]
+        GQL["GraphQL Subgraph (/graphql/analytics)"]
+        WS["WebSocket Alerts Engine (/ws/alerts)"]
+    end
+
+    subgraph BusinessLayer["⚙️ Domain & Application Services"]
+        InvSvc["InventoryService<br/>(Stock Ops & Pre-fetch)"]
+        AnalyticsSvc["AnalyticsService<br/>(Heatmaps & Forecasting)"]
+        ReqSvc["RequisitionService<br/>(Approval Workflow)"]
+        VendorSvc["VendorService<br/>(Excel Delivery Ingestion)"]
+        ImportSvc["DataImportService<br/>(AI Mapping + Gating)"]
+        PdfSvc["InvoicePdfService & ReportService<br/>(ReportLab Engine)"]
+        NotifySvc["NotificationService<br/>(SMTP & Welcome Emails)"]
+        CacheSvc["CacheService<br/>(Pattern Invalidation)"]
+        AgentSvc["AgentService & ReAct Tools<br/>(LangGraph Architecture)"]
+    end
+
+    subgraph DataStorage["💾 Data & Infrastructure Layer"]
+        PG[("🐘 PostgreSQL / Neon / Supabase<br/>Composite B-Tree Indexes<br/>Alembic Migrations")]
+        Redis[("⚡ Upstash Redis<br/>Cache & Rate Limiting")]
+        Qdrant[("🧠 Qdrant Cloud Vector DB<br/>Gemini 768-dim Embeddings")]
+        Azure[("☁️ Azure Blob Storage<br/>Invoices, Reports & Manifests")]
+        Groq["⚡ Groq Cloud (LLaMA 3.3 70B)"]
+        Sarvam["🎙️ Sarvam AI (Saaras v3 STT)"]
+    end
+
+    %% Client to Gateway
+    Landing --> CORS
+    AuthApp --> CORS
+    AdminPort --> CORS
+    MgrPort --> CORS
+    StaffPort --> CORS
+    VendorPort --> CORS
+    CORS --> Limiter --> AuthMid
+    AuthMid --> REST
+    AuthMid --> GQL
+    AuthMid --> WS
+
+    %% Gateway to Business Services
+    REST --> InvSvc
+    REST --> AnalyticsSvc
+    REST --> ReqSvc
+    REST --> VendorSvc
+    REST --> ImportSvc
+    REST --> AgentSvc
+    GQL --> AnalyticsSvc
+    WS --> InvSvc
+
+    %% Services to Data Storage
+    InvSvc --> PG
+    ReqSvc --> PG
+    VendorSvc --> PG
+    VendorSvc --> PdfSvc
+    VendorSvc --> Azure
+    AnalyticsSvc --> PG
+    AnalyticsSvc --> CacheSvc
+    CacheSvc --> Redis
+    ImportSvc --> Groq
+    ImportSvc --> PG
+    AgentSvc --> Groq
+    AgentSvc --> Qdrant
+    AgentSvc --> Sarvam
+    NotifySvc --> PG
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENT LAYER                             │
-│  React SPA (6 Role-Based Portals + Landing Page)                │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTPS/REST + WebSocket + GraphQL
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      API GATEWAY LAYER                           │
-│  FastAPI  ─  REST (56 endpoints)  +  WebSocket                  │
-│           ─  GraphQL  /graphql/analytics  (Strawberry)          │
-│  Rate Limiting + JWT Auth + CORS Middleware                      │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-        ┌────────────────┼────────────────────┐
-        ▼                ▼                    ▼
-┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐
-│   Business   │  │  AI Agent    │  │  Analytics Service   │
-│   Logic      │  │  Service     │  │                      │
-│              │  │              │  │  REST  /api/analytics │
-│ Inventory    │  │ LangGraph    │  │  GQL   /graphql/      │
-│ Requisition  │  │ 9 Tools      │  │        analytics     │
-│ Vendor       │  │ ChromaDB RAG │  │  (shared Redis cache) │
-└──────┬───────┘  └──────┬───────┘  └──────┬──────────────┘
-       │                 │                 │
-       └─────────────────┼─────────────────┘
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    INFRASTRUCTURE LAYER                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  PostgreSQL  │  │ Upstash Redis│  │  ChromaDB    │         │
-│  │  (Neon)      │  │  (REST API)  │  │  (Vector DB) │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
-└─────────────────────────────────────────────────────────────────┘
+
+---
+
+## 👥 Role-Based Access Control (RBAC) & User Journeys
+
+```mermaid
+graph LR
+    subgraph Roles["👤 User Roles & Hierarchies"]
+        SuperAdmin["👑 Super Admin"]
+        Admin["🛡️ Organization Admin"]
+        Manager["📊 Inventory Manager"]
+        Staff["📦 Pharmacy / Warehouse Staff"]
+        Vendor["🚚 Delivery Vendor"]
+        Guest["👀 Guest / Demo Visitor"]
+    end
+
+    subgraph Permissions["⚡ Key Capabilities & Permitted Actions"]
+        TenantMgmt["🏢 Multi-Tenant Org Provisioning<br/>Global Audit Compliance"]
+        UserMgmt["👥 User Management & Role Assignment<br/>System Audit Logs & PDF Reports"]
+        ApprovalMgmt["✅ Requisition Approval / Rejection<br/>Critical Stock & Expiry Alerts<br/>Unmasked Forecasting Analytics"]
+        StockOps["📝 Inbound / Outbound Stock Entry<br/>Requisition Request Submission<br/>Location Stock Lookups"]
+        ManifestUpload["📄 Excel Manifest Upload<br/>Auto Invoice Generation<br/>PDF Invoice Download (Azure Blob)"]
+        ReadOnlyExplore["🔍 Read-Only Catalog & Heatmap<br/>(Forecasting Metrics Masked)"]
+    end
+
+    SuperAdmin --> TenantMgmt
+    SuperAdmin --> UserMgmt
+    Admin --> UserMgmt
+    Admin --> ApprovalMgmt
+    Manager --> ApprovalMgmt
+    Staff --> StockOps
+    Vendor --> ManifestUpload
+    Guest --> ReadOnlyExplore
 ```
+
+---
+
 
 ---
 
