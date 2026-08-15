@@ -172,30 +172,56 @@ def test_audit_repo_sql_level_filtering(db, admin_user):
 # ── 5. Lookup Endpoints Redis Caching ─────────────────────────────────────
 
 def test_inventory_lookup_redis_caching(client, admin_user):
+    from unittest.mock import patch
+
     headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+    fake_redis_store = {}
 
-    # Clear cache before test
-    cache_invalidate_pattern("ref:*")
+    class MockRedisClient:
+        def get(self, key):
+            return fake_redis_store.get(key)
 
-    # 1. First fetch -> should populate cache
-    res1 = client.get("/api/inventory/locations")
-    assert res1.status_code == 200
-    assert cache_get("ref:locations") is not None
+        def setex(self, key, ttl, value):
+            fake_redis_store[key] = value
+            return True
 
-    # 2. Second fetch -> serves from cache
-    res2 = client.get("/api/inventory/locations")
-    assert res2.status_code == 200
-    assert res1.json() == res2.json()
+        def delete(self, *keys):
+            for k in keys:
+                fake_redis_store.pop(k, None)
 
-    # 3. Create new location -> should invalidate cache
-    new_loc_payload = {
-        "name": "Super Fast Warehouse",
-        "type": "warehouse",
-        "region": "South",
-        "address": "123 Speed Way",
-    }
-    create_res = client.post("/api/inventory/locations", json=new_loc_payload, headers=headers)
-    assert create_res.status_code == 200
+        def scan(self, cursor=0, match=None, count=100):
+            prefix = match.rstrip("*") if match else ""
+            matching = [k for k in fake_redis_store if k.startswith(prefix)]
+            return 0, matching
 
-    # Cache should now be invalidated
-    assert cache_get("ref:locations") is None
+    mock_client = MockRedisClient()
+
+    with patch("app.application.cache_service.get_redis", return_value=mock_client), \
+         patch("app.infrastructure.cache.redis_client.get_redis", return_value=mock_client):
+
+        # Clear cache before test
+        cache_invalidate_pattern("ref:*")
+
+        # 1. First fetch -> should populate cache
+        res1 = client.get("/api/inventory/locations")
+        assert res1.status_code == 200
+        assert cache_get("ref:locations") is not None
+
+        # 2. Second fetch -> serves from cache
+        res2 = client.get("/api/inventory/locations")
+        assert res2.status_code == 200
+        assert res1.json() == res2.json()
+
+        # 3. Create new location -> should invalidate cache
+        new_loc_payload = {
+            "name": "Super Fast Warehouse",
+            "type": "warehouse",
+            "region": "South",
+            "address": "123 Speed Way",
+        }
+        create_res = client.post("/api/inventory/locations", json=new_loc_payload, headers=headers)
+        assert create_res.status_code == 200
+
+        # Cache should now be invalidated
+        assert cache_get("ref:locations") is None
+
