@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     Float,
     LargeBinary,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -25,7 +26,7 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), unique=True, nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
@@ -38,6 +39,9 @@ class Organization(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_role_active", "role", "is_active"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
@@ -45,9 +49,9 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(200), nullable=True)
-    role = Column(String(50), nullable=False, default="staff")
+    role = Column(String(50), nullable=False, default="staff", index=True)
     location_ids = Column(JSON, default=[])  # Scoped locations for staff/vendor
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
     is_verified = Column(Boolean, default=False)
     login_attempts = Column(Integer, default=0)
     locked_until = Column(TIMESTAMP, nullable=True)
@@ -65,9 +69,9 @@ class Location(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
-    name = Column(String(200), nullable=False)
-    type = Column(String(50), nullable=False)
-    region = Column(String(100), nullable=False)
+    name = Column(String(200), nullable=False, index=True)
+    type = Column(String(50), nullable=False, index=True)
+    region = Column(String(100), nullable=False, index=True)
     address = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -78,19 +82,19 @@ class Location(Base):
 
 class Item(Base):
     __tablename__ = "items"
+    __table_args__ = (
+        Index("ix_items_name_category", "name", "category"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
-    name = Column(String(200), nullable=False)
-    category = Column(String(100), nullable=False)
+    name = Column(String(200), nullable=False, index=True)
+    category = Column(String(100), nullable=False, index=True)
     unit = Column(String(50), nullable=False)
     lead_time_days = Column(Integer, nullable=False)
     min_stock = Column(Integer, nullable=False)
 
     # ── Pharmacy-specific field ───────────────────────────────────────────
-    # storage_temp is a PRODUCT-level attribute (Insulin is always cold_chain).
-    # batch_number and expiry_date are BATCH-level — they belong on the
-    # InventoryTransaction where each inbound delivery records its own batch.
     storage_temp = Column(String(20), nullable=False, default="ambient")  # ambient | cold_chain
 
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -102,11 +106,15 @@ class Item(Base):
 
 class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
+    __table_args__ = (
+        Index("ix_inv_tx_loc_item_date", "location_id", "item_id", "date"),
+        Index("ix_inv_tx_item_date", "item_id", "date"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
-    date = Column(Date, nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
     opening_stock = Column(Integer, nullable=False)
     received = Column(Integer, nullable=False, default=0)
     issued = Column(Integer, nullable=False, default=0)
@@ -115,8 +123,6 @@ class InventoryTransaction(Base):
     entered_by = Column(String(100), default="system")
 
     # ── Batch-level pharmacy fields ──────────────────────────────────────
-    # Each inbound delivery (received > 0) records which batch arrived and when
-    # it expires — enabling multi-batch tracking per product.
     batch_number = Column(String(50), nullable=True, index=True)   # e.g. "BT-25-4821"
     expiry_date = Column(Date, nullable=True, index=True)           # expiry of this batch
 
@@ -147,12 +153,15 @@ class ChatSession(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_session_created", "session_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String(100), ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(String(100), ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
 
     session = relationship("ChatSession", back_populates="messages")
 
@@ -161,20 +170,24 @@ class ChatMessage(Base):
 
 class Requisition(Base):
     __tablename__ = "requisitions"
+    __table_args__ = (
+        Index("ix_requisitions_status_urgency", "status", "urgency"),
+        Index("ix_requisitions_loc_created", "location_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     requisition_number = Column(String(50), unique=True, nullable=False, index=True)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     requested_by = Column(String(100), nullable=False)
     department = Column(String(100), nullable=False)
-    urgency = Column(String(20), nullable=False, default="NORMAL")
-    status = Column(String(20), nullable=False, default="PENDING")
+    urgency = Column(String(20), nullable=False, default="NORMAL", index=True)
+    status = Column(String(20), nullable=False, default="PENDING", index=True)
     approved_by = Column(String(100), nullable=True)
     approved_at = Column(TIMESTAMP, nullable=True)
     rejected_at = Column(TIMESTAMP, nullable=True)
     rejection_reason = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     location = relationship("Location")
@@ -185,10 +198,13 @@ class Requisition(Base):
 
 class RequisitionItem(Base):
     __tablename__ = "requisition_items"
+    __table_args__ = (
+        Index("ix_req_items_req_item", "requisition_id", "item_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id"), nullable=False)
-    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id"), nullable=False, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
     quantity_requested = Column(Integer, nullable=False)
     quantity_approved = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
@@ -206,19 +222,50 @@ class VendorUpload(Base):
     __tablename__ = "vendor_uploads"
 
     id = Column(Integer, primary_key=True, index=True)
-    vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     total_rows = Column(Integer, nullable=False, default=0)
     success_rows = Column(Integer, nullable=False, default=0)
     error_rows = Column(Integer, nullable=False, default=0)
-    errors_detail = Column(JSON, nullable=True)  # [{row: 3, reason: "item not found"}]
-    status = Column(String(20), nullable=False, default="PROCESSING")  # PROCESSING, COMPLETED, FAILED
-    uploaded_at = Column(TIMESTAMP, server_default=func.now())
+    errors_detail = Column(JSON, nullable=True)
+    status = Column(String(20), nullable=False, default="PROCESSING", index=True)
+    uploaded_at = Column(TIMESTAMP, server_default=func.now(), index=True)
 
     vendor = relationship("User")
     location = relationship("Location")
+    invoice = relationship("VendorInvoice", back_populates="vendor_upload", uselist=False)
+
+
+# ── Vendor Invoices ───────────────────────────────────────────────────────
+
+class VendorInvoice(Base):
+    """
+    Formal delivery invoices auto-generated upon processing vendor Excel manifests.
+    Stores line items, financial totals, and links to Azure Blob Storage / DB PDF bytes.
+    """
+    __tablename__ = "vendor_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    vendor_upload_id = Column(Integer, ForeignKey("vendor_uploads.id"), nullable=False, index=True)
+    invoice_number = Column(String(50), unique=True, nullable=False, index=True)
+    invoice_date = Column(Date, nullable=False, index=True)
+    line_items = Column(JSON, nullable=False)
+    subtotal = Column(Float, nullable=False, default=0.0)
+    tax_amount = Column(Float, nullable=False, default=0.0)
+    total_amount = Column(Float, nullable=False, default=0.0)
+    status = Column(String(20), nullable=False, default="ISSUED", index=True)
+    pdf_path = Column(String(500), nullable=True)
+    pdf_url = Column(String(1000), nullable=True)
+    pdf_content = Column(LargeBinary, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
+
+    vendor = relationship("User")
+    vendor_upload = relationship("VendorUpload", back_populates="invoice")
+    organization = relationship("Organization")
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────
@@ -226,17 +273,20 @@ class VendorUpload(Base):
 class AuditLog(Base):
     """Tracks all user actions for audit trail."""
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_action_created", "action", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
-    username = Column(String(100), nullable=False)
-    action = Column(String(50), nullable=False)
-    resource_type = Column(String(50), nullable=False)
+    username = Column(String(100), nullable=False, index=True)
+    action = Column(String(50), nullable=False, index=True)
+    resource_type = Column(String(50), nullable=False, index=True)
     resource_id = Column(String(100), nullable=True)
     details = Column(JSON, nullable=True)
     ip_address = Column(String(45), nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
 
     user = relationship("User")
 
@@ -244,36 +294,22 @@ class AuditLog(Base):
 # ── Data Import ───────────────────────────────────────────────────────────
 
 class DataImportJob(Base):
-    """
-    Tracks every CSV/Excel import job (synchronous or background).
-
-    Design: raw file bytes are stored here (≤ 5 MB per the upload limit)
-    so the confirm step can re-read the file without requiring re-upload.
-    Jobs in PENDING status older than 24 h can be cleaned up in a maintenance task.
-    """
     __tablename__ = "data_import_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
     uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
-    target_entity = Column(String(50), nullable=False)  # inventory_transaction | item | location
-
-    # Status lifecycle: PENDING → MAPPING → PROCESSING → COMPLETED | FAILED | PARTIAL
+    target_entity = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="PENDING", index=True)
 
     total_rows = Column(Integer, nullable=True)
     success_rows = Column(Integer, nullable=False, default=0)
     quarantined_rows = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
-
-    # AI-produced column mapping (JSON) stored for user review/edit before confirmation
     mapping_result = Column(JSON, nullable=True)
     mapping_cache_hit = Column(Boolean, default=False)
-
-    # Raw file bytes stored so the confirm step doesn't need a second upload
     file_content = Column(LargeBinary, nullable=True)
-
     is_background = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -287,24 +323,15 @@ class DataImportJob(Base):
 
 
 class ImportQuarantineRow(Base):
-    """
-    Every row rejected during import is written here — never silently dropped.
-
-    Reasons:
-      LOW_CONFIDENCE   — AI mapping confidence below threshold for a required field
-      VALIDATION_ERROR — type coercion failed or value out of range
-      MISSING_REQUIRED — a required target field could not be mapped or was empty
-      DB_ERROR         — row passed validation but the DB write raised an exception
-    """
     __tablename__ = "import_quarantine_rows"
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("data_import_jobs.id"), nullable=False, index=True)
-    row_number = Column(Integer, nullable=False)   # 1-indexed, matches spreadsheet row
-    raw_data = Column(JSON, nullable=False)         # original row as {column: value}
-    reason = Column(String(30), nullable=False)     # LOW_CONFIDENCE | VALIDATION_ERROR | MISSING_REQUIRED | DB_ERROR
-    field_name = Column(String(100), nullable=True) # which field triggered the quarantine
-    confidence_score = Column(Float, nullable=True) # AI confidence score (for LOW_CONFIDENCE rows)
+    row_number = Column(Integer, nullable=False)
+    raw_data = Column(JSON, nullable=False)
+    reason = Column(String(30), nullable=False)
+    field_name = Column(String(100), nullable=True)
+    confidence_score = Column(Float, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     job = relationship("DataImportJob", back_populates="quarantine_rows")

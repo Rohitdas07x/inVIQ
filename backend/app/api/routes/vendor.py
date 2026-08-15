@@ -7,6 +7,7 @@ The system parses rows, matches item names, and creates inventory transactions.
 
 import logging
 from io import BytesIO
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Request, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -179,3 +180,229 @@ def download_template(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=delivery_template.xlsx"},
     )
+
+
+# ── GET /vendor/invoices ──────────────────────────────────────────────────
+
+@router.get("/invoices")
+def list_invoices(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    status: Optional[str] = Query(None, description="Filter by status (ISSUED, PAID, CANCELLED)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List delivery invoices.
+    Vendors only see their own invoices; Admins and Managers see all organization invoices.
+    """
+    _require_vendor_role(current_user)
+
+    from app.infrastructure.database.invoice_repo import InvoiceRepository
+    invoice_repo = InvoiceRepository(db)
+
+    # Vendors only see their own invoices
+    vendor_filter = current_user.id if current_user.role == "vendor" else None
+    invoices, total = invoice_repo.list_invoices(
+        org_id=current_user.org_id,
+        vendor_user_id=vendor_filter,
+        status=status,
+        skip=skip,
+        limit=limit,
+    )
+
+    data = []
+    for inv in invoices:
+        vendor_name = inv.vendor.full_name if inv.vendor else (inv.vendor.username if inv.vendor else "Vendor")
+        data.append({
+            "id": inv.id,
+            "invoice_number": inv.invoice_number,
+            "invoice_date": str(inv.invoice_date),
+            "vendor_user_id": inv.vendor_user_id,
+            "vendor_name": vendor_name,
+            "vendor_upload_id": inv.vendor_upload_id,
+            "items_count": len(inv.line_items) if isinstance(inv.line_items, list) else 0,
+            "subtotal": inv.subtotal,
+            "tax_amount": inv.tax_amount,
+            "total_amount": inv.total_amount,
+            "status": inv.status,
+            "pdf_url": inv.pdf_url,
+            "created_at": str(inv.created_at) if inv.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": data,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+    }
+
+
+# ── GET /vendor/invoices/{invoice_id} ─────────────────────────────────────
+
+@router.get("/invoices/{invoice_id}")
+def get_invoice_detail(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get full details of a specific delivery invoice including all line items."""
+    _require_vendor_role(current_user)
+
+    from app.infrastructure.database.invoice_repo import InvoiceRepository
+    from app.core.exceptions import NotFoundError, AuthorizationError
+
+    invoice_repo = InvoiceRepository(db)
+    invoice = invoice_repo.get_by_id(invoice_id)
+
+    if not invoice:
+        raise NotFoundError("VendorInvoice", invoice_id)
+
+    # Vendors cannot view other vendors' invoices
+    if current_user.role == "vendor" and invoice.vendor_user_id != current_user.id:
+        raise AuthorizationError("You do not have permission to view this invoice")
+
+    vendor_name = invoice.vendor.full_name if invoice.vendor else (invoice.vendor.username if invoice.vendor else "Vendor")
+
+    return {
+        "success": True,
+        "data": {
+            "id": invoice.id,
+            "org_id": invoice.org_id,
+            "vendor_user_id": invoice.vendor_user_id,
+            "vendor_name": vendor_name,
+            "vendor_upload_id": invoice.vendor_upload_id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": str(invoice.invoice_date),
+            "line_items": invoice.line_items,
+            "subtotal": invoice.subtotal,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+            "pdf_path": invoice.pdf_path,
+            "pdf_url": invoice.pdf_url,
+            "created_at": str(invoice.created_at) if invoice.created_at else None,
+        },
+    }
+
+
+# ── GET /vendor/invoices/{invoice_id}/pdf ─────────────────────────────────
+
+@router.get("/invoices/{invoice_id}/pdf")
+def download_invoice_pdf(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download the generated delivery invoice PDF.
+    Streams from Azure Blob Storage or database fallback bytes.
+    """
+    _require_vendor_role(current_user)
+
+    from app.infrastructure.database.invoice_repo import InvoiceRepository
+    from app.infrastructure.storage.azure_blob_storage import get_storage_service
+    from app.application.invoice_pdf_service import InvoicePdfService
+    from app.core.exceptions import NotFoundError, AuthorizationError
+
+    invoice_repo = InvoiceRepository(db)
+    invoice = invoice_repo.get_by_id(invoice_id)
+
+    if not invoice:
+        raise NotFoundError("VendorInvoice", invoice_id)
+
+    if current_user.role == "vendor" and invoice.vendor_user_id != current_user.id:
+        raise AuthorizationError("You do not have permission to download this invoice")
+
+    pdf_bytes = None
+
+    # Try downloading from Azure Blob Storage if available
+    storage_service = get_storage_service()
+    if invoice.pdf_path and storage_service.is_available:
+        pdf_bytes = storage_service.download_file(invoice.pdf_path)
+
+    # Fallback to database binary content
+    if not pdf_bytes and invoice.pdf_content:
+        pdf_bytes = invoice.pdf_content
+
+    # Fallback to dynamic re-render if needed
+    if not pdf_bytes:
+        vendor = invoice.vendor
+        location = invoice.vendor_upload.location if invoice.vendor_upload else None
+
+        vendor_data = {
+            "username": vendor.username if vendor else "vendor",
+            "full_name": vendor.full_name if vendor else "Vendor",
+            "email": vendor.email if vendor else "",
+        }
+        location_data = {
+            "name": location.name if location else "Receiving Location",
+            "region": location.region if location else "General",
+        }
+
+        invoice_payload = {
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date,
+            "line_items": invoice.line_items,
+            "subtotal": invoice.subtotal,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+        }
+
+        pdf_bytes = InvoicePdfService.generate_invoice_pdf(
+            invoice_data=invoice_payload,
+            vendor_data=vendor_data,
+            location_data=location_data,
+        )
+
+    filename = f"{invoice.invoice_number}.pdf"
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ── GET /vendor/uploads/{upload_id}/invoice ───────────────────────────────
+
+@router.get("/uploads/{upload_id}/invoice")
+def get_invoice_by_upload(
+    upload_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve invoice record for a specific vendor upload."""
+    _require_vendor_role(current_user)
+
+    from app.infrastructure.database.invoice_repo import InvoiceRepository
+    from app.core.exceptions import NotFoundError, AuthorizationError
+
+    invoice_repo = InvoiceRepository(db)
+    invoice = invoice_repo.get_by_upload_id(upload_id)
+
+    if not invoice:
+        raise NotFoundError("VendorInvoice for upload", upload_id)
+
+    if current_user.role == "vendor" and invoice.vendor_user_id != current_user.id:
+        raise AuthorizationError("You do not have permission to view this invoice")
+
+    return {
+        "success": True,
+        "data": {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": str(invoice.invoice_date),
+            "vendor_user_id": invoice.vendor_user_id,
+            "vendor_upload_id": invoice.vendor_upload_id,
+            "line_items": invoice.line_items,
+            "subtotal": invoice.subtotal,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+            "pdf_url": invoice.pdf_url,
+            "created_at": str(invoice.created_at) if invoice.created_at else None,
+        },
+    }
+

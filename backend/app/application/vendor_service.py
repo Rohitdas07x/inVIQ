@@ -1,11 +1,13 @@
 """
-Vendor Service — Excel delivery parsing and bulk transaction creation.
+Vendor Service — Excel delivery parsing, bulk transaction creation, and automated invoice generation.
 
 Handles:
   - Excel file parsing via openpyxl
   - Item name matching (exact match, case-insensitive)
   - Bulk transaction creation via InventoryService
   - VendorUpload record tracking
+  - Automated Vendor Delivery Invoice generation with ReportLab PDF rendering
+  - Cloud PDF upload via AzureBlobStorageService with database binary fallback
 """
 
 import logging
@@ -15,20 +17,24 @@ from io import BytesIO
 
 from sqlalchemy.orm import Session
 
-from app.infrastructure.database.models import Item, VendorUpload
+from app.infrastructure.database.models import Item, VendorUpload, User, Location, VendorInvoice
 from app.application.inventory_service import InventoryService
 from app.infrastructure.database.inventory_repo import InventoryRepository
+from app.infrastructure.database.invoice_repo import InvoiceRepository
+from app.application.invoice_pdf_service import InvoicePdfService
+from app.infrastructure.storage.azure_blob_storage import get_storage_service
 
 logger = logging.getLogger("smart_inventory.vendor")
 
 
 class VendorService:
-    """Parse vendor Excel uploads and create inventory transactions."""
+    """Parse vendor Excel uploads, create inventory transactions, and generate delivery invoices."""
 
     def __init__(self, db: Session):
         self.db = db
         self.inv_repo = InventoryRepository(db)
         self.inv_service = InventoryService(self.inv_repo)
+        self.invoice_repo = InvoiceRepository(db)
 
     def parse_and_process_excel(
         self,
@@ -39,11 +45,11 @@ class VendorService:
         org_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Parse an Excel file and create inventory transactions for each row.
+        Parse an Excel file, create inventory transactions, and generate a formal delivery invoice.
 
-        Expected columns: item_name, quantity_received, delivery_date (optional), notes (optional)
+        Expected columns: item_name, quantity_received, unit_price (optional), delivery_date (optional), notes (optional)
 
-        Returns summary with success/error counts.
+        Returns summary with upload & invoice details.
         """
         try:
             import openpyxl
@@ -74,6 +80,8 @@ class VendorService:
                     col_map["item_name"] = i
                 elif "quantity" in h or "received" in h or "qty" in h:
                     col_map["quantity"] = i
+                elif "price" in h or "cost" in h or "rate" in h or "unit" in h and "price" in h:
+                    col_map["price"] = i
                 elif "date" in h:
                     col_map["date"] = i
                 elif "note" in h:
@@ -92,17 +100,39 @@ class VendorService:
             all_items = items_query.all()
             item_lookup = {item.name.lower(): item for item in all_items}
 
+            # Pre-fetch all latest closing stocks for location in ONE single query (eliminates N+1)
+            location_stocks: Dict[int, int] = self.inv_repo.get_latest_stocks_for_location(location_id)
+
             # Process rows
             success_count = 0
             error_list = []
+            successful_line_items = []
             today = date.today()
 
             for row_idx, row in enumerate(rows[1:], start=2):
                 try:
                     item_name = str(row[col_map["item_name"]]).strip() if row[col_map["item_name"]] else ""
                     quantity = row[col_map["quantity"]]
-                    delivery_date = row[col_map.get("date", -1)] if col_map.get("date") is not None and col_map.get("date") < len(row) else None
-                    notes = str(row[col_map.get("notes", -1)]).strip() if col_map.get("notes") is not None and col_map.get("notes") < len(row) and row[col_map.get("notes")] else ""
+                    delivery_date = (
+                        row[col_map.get("date", -1)]
+                        if col_map.get("date") is not None and col_map.get("date") < len(row)
+                        else None
+                    )
+                    notes = (
+                        str(row[col_map.get("notes", -1)]).strip()
+                        if col_map.get("notes") is not None and col_map.get("notes") < len(row) and row[col_map.get("notes")]
+                        else ""
+                    )
+
+                    # Optional price per item
+                    unit_price = 150.0  # sensible healthcare item default
+                    if col_map.get("price") is not None and col_map.get("price") < len(row) and row[col_map.get("price")] is not None:
+                        try:
+                            parsed_price = float(row[col_map["price"]])
+                            if parsed_price > 0:
+                                unit_price = parsed_price
+                        except (TypeError, ValueError):
+                            pass
 
                     if not item_name:
                         error_list.append({"row": row_idx, "reason": "Empty item name"})
@@ -137,22 +167,35 @@ class VendorService:
                             except ValueError:
                                 pass  # Use today
 
+                    # In-memory closing stock tracking (O(1) — 0 DB roundtrips)
+                    opening_stock = location_stocks.get(matched_item.id, 0)
+                    closing_stock = opening_stock + qty
+                    location_stocks[matched_item.id] = closing_stock
+
                     # Create transaction (flush only — commit at end)
-                    result = self.inv_service.add_transaction(
+                    self.inv_repo.create_transaction(
                         location_id=location_id,
                         item_id=matched_item.id,
-                        transaction_date=tx_date,
+                        date=tx_date,
+                        opening_stock=opening_stock,
                         received=qty,
                         issued=0,
+                        closing_stock=closing_stock,
                         notes=f"Vendor delivery: {notes}" if notes else f"Vendor delivery from {filename}",
                         entered_by=f"vendor/upload/{vendor_user_id}",
                         flush_only=True,
                     )
 
-                    if result.get("success"):
-                        success_count += 1
-                    else:
-                        error_list.append({"row": row_idx, "reason": result.get("error", "Transaction failed")})
+                    success_count += 1
+                    line_total = round(qty * unit_price, 2)
+                    successful_line_items.append({
+                        "item_id": matched_item.id,
+                        "item_name": matched_item.name,
+                        "quantity": qty,
+                        "unit": matched_item.unit or "Units",
+                        "unit_price": unit_price,
+                        "total": line_total,
+                    })
 
                 except Exception as e:
                     error_list.append({"row": row_idx, "reason": str(e)})
@@ -178,23 +221,136 @@ class VendorService:
 
             wb.close()
 
+            # ── Generate Vendor Delivery Invoice ─────────────────────────
+            invoice_summary = None
+            if success_count > 0:
+                try:
+                    invoice_summary = self._generate_invoice_for_upload(
+                        upload=upload,
+                        line_items=successful_line_items,
+                        tx_date=today,
+                        org_id=org_id,
+                    )
+                except Exception as inv_err:
+                    logger.error("Failed to generate invoice for upload %d: %s", upload.id, str(inv_err))
+
+            response_data = {
+                "upload_id": upload.id,
+                "filename": filename,
+                "total_rows": len(rows) - 1,
+                "success": success_count,
+                "errors": len(error_list),
+                "error_details": error_list[:20],  # Cap at 20 errors in response
+                "status": upload.status,
+            }
+
+            if invoice_summary:
+                response_data["invoice"] = invoice_summary
+
             return {
                 "success": True,
-                "data": {
-                    "upload_id": upload.id,
-                    "filename": filename,
-                    "total_rows": len(rows) - 1,
-                    "success": success_count,
-                    "errors": len(error_list),
-                    "error_details": error_list[:20],  # Cap at 20 errors in response
-                    "status": upload.status,
-                },
+                "data": response_data,
             }
 
         except Exception as e:
             self.db.rollback()
             logger.error("Failed to process vendor upload: %s", str(e))
             return {"success": False, "error": f"Failed to process file: {str(e)}"}
+
+    def _generate_invoice_for_upload(
+        self,
+        upload: VendorUpload,
+        line_items: List[Dict[str, Any]],
+        tx_date: date,
+        org_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Internal helper to calculate financial totals, generate PDF, upload to Azure, and save VendorInvoice."""
+        subtotal = round(sum(item["total"] for item in line_items), 2)
+        tax_amount = round(subtotal * 0.18, 2)  # Standard 18% GST
+        total_amount = round(subtotal + tax_amount, 2)
+
+        # Generate sequential invoice number
+        invoice_number = self.invoice_repo.generate_next_invoice_number(tx_date)
+
+        # Lookup vendor user and location
+        vendor = self.db.query(User).filter(User.id == upload.vendor_user_id).first()
+        location = self.db.query(Location).filter(Location.id == upload.location_id).first()
+
+        vendor_data = {
+            "username": vendor.username if vendor else f"vendor_{upload.vendor_user_id}",
+            "full_name": vendor.full_name if vendor else "Authorized Vendor",
+            "email": vendor.email if vendor else "vendor@inviq.io",
+        }
+        location_data = {
+            "name": location.name if location else f"Location #{upload.location_id}",
+            "region": location.region if location else "General",
+        }
+
+        invoice_payload = {
+            "invoice_number": invoice_number,
+            "invoice_date": tx_date,
+            "line_items": line_items,
+            "subtotal": subtotal,
+            "tax_amount": tax_amount,
+            "total_amount": total_amount,
+            "status": "ISSUED",
+        }
+
+        # Render PDF via ReportLab
+        pdf_bytes = InvoicePdfService.generate_invoice_pdf(
+            invoice_data=invoice_payload,
+            vendor_data=vendor_data,
+            location_data=location_data,
+            organization_name="InvIQ Healthcare Network",
+        )
+
+        # Upload to Azure Blob Storage
+        blob_path = f"invoices/{tx_date.year}/{tx_date.month:02d}/{invoice_number}.pdf"
+        storage_service = get_storage_service()
+        pdf_url = storage_service.upload_file(
+            file_bytes=pdf_bytes,
+            blob_name=blob_path,
+            content_type="application/pdf",
+        )
+
+        # If SAS URL is supported, generate browser presigned link
+        sas_url = storage_service.generate_sas_url(blob_path) if pdf_url else None
+
+        # Persist invoice in database
+        invoice = self.invoice_repo.create(
+            org_id=org_id,
+            vendor_user_id=upload.vendor_user_id,
+            vendor_upload_id=upload.id,
+            invoice_number=invoice_number,
+            invoice_date=tx_date,
+            line_items=line_items,
+            subtotal=subtotal,
+            tax_amount=tax_amount,
+            total_amount=total_amount,
+            status="ISSUED",
+            pdf_path=blob_path,
+            pdf_url=sas_url or pdf_url,
+            pdf_content=pdf_bytes,  # In-database binary fallback
+        )
+
+        logger.info(
+            "Auto-generated vendor delivery invoice %s (Total: ₹%0.2f, items: %d)",
+            invoice_number,
+            total_amount,
+            len(line_items),
+        )
+
+        return {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": str(invoice.invoice_date),
+            "items_count": len(line_items),
+            "subtotal": invoice.subtotal,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+            "pdf_url": invoice.pdf_url,
+        }
 
     def get_uploads_for_vendor(self, vendor_user_id: int) -> List[dict]:
         """Get upload history for a specific vendor."""
