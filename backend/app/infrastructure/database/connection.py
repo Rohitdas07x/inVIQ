@@ -83,10 +83,12 @@ else:
     engine = create_engine_with_retry(
         DATABASE_URL,
         max_retries=3,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=10,
+        max_overflow=20,
+        pool_recycle=1800,
         pool_pre_ping=True,
     )
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

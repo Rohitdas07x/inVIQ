@@ -104,4 +104,30 @@ class AuditRepository:
             logger.error("Database error getting audit logs by resource: %s", str(e))
             raise DatabaseError(f"Failed to get audit logs by resource: {str(e)}")
 
+    def get_filtered(
+        self,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        org_id: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[AuditLog]:
+        """Get audit logs with composable SQL WHERE filters (pushing filters down to DB engine)."""
+        try:
+            query = self.db.query(AuditLog)
+            if org_id is not None:
+                query = query.filter(AuditLog.org_id == org_id)
+            if username:
+                query = query.filter(AuditLog.username == username)
+            if action:
+                query = query.filter(AuditLog.action == action)
+            if resource_type:
+                query = query.filter(AuditLog.resource_type == resource_type)
+
+            return query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+        except SQLAlchemyError as e:
+            logger.error("Database error getting filtered audit logs: %s", str(e))
+            raise DatabaseError(f"Failed to get filtered audit logs: {str(e)}")
+
+
 

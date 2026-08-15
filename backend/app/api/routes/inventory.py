@@ -22,7 +22,11 @@ from app.core.exceptions import (
     DuplicateError,
 )
 from app.application.inventory_service import InventoryService
-from app.application.cache_service import cache_invalidate_pattern
+from app.application.cache_service import (
+    cache_get,
+    cache_set,
+    cache_invalidate_pattern,
+)
 from app.infrastructure.database.inventory_repo import InventoryRepository
 from app.infrastructure.database.models import User
 from app.api.schemas.inventory_schemas import (
@@ -42,14 +46,22 @@ def get_all_locations(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
+    """List all locations with a 5-minute Redis cache."""
+    cache_key = "ref:locations"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     locations = repo.get_all_locations()
-    return {
+    res = {
         "success": True,
         "data": [
             {"id": loc.id, "name": loc.name, "type": loc.type, "region": loc.region}
             for loc in locations
         ],
     }
+    cache_set(cache_key, res, ttl=300)
+    return res
 
 
 @router.get("/items")
@@ -57,8 +69,14 @@ def get_all_items(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
+    """List all catalog items with a 5-minute Redis cache."""
+    cache_key = "ref:items"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     items = repo.get_all_items()
-    return {
+    res = {
         "success": True,
         "data": [
             {
@@ -70,6 +88,8 @@ def get_all_items(
             for item in items
         ],
     }
+    cache_set(cache_key, res, ttl=300)
+    return res
 
 
 @router.get("/location/{location_id}/items")
@@ -79,16 +99,24 @@ def get_location_items(
     service: InventoryService = Depends(get_inventory_service),
     current_user: Optional[User] = Depends(get_optional_user),
 ):
+    """Get location item stock list with a 5-minute Redis cache."""
+    cache_key = f"ref:location_items:{location_id}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     location = repo.get_location_by_id(location_id)
     if not location:
         raise NotFoundError("Location", location_id)
 
     items = service.get_location_items(location_id)
-    return {
+    res = {
         "success": True,
         "location": {"id": location.id, "name": location.name},
         "data": items,
     }
+    cache_set(cache_key, res, ttl=300)
+    return res
 
 
 @router.get("/stock/{location_id}/{item_id}")
@@ -129,6 +157,8 @@ def create_location(
         address=body.address.strip() if body.address else None,
     )
 
+    cache_invalidate_pattern("ref:*")
+
     return {
         "success": True,
         "message": "Location created successfully",
@@ -163,6 +193,8 @@ def create_item(
         storage_temp=body.storage_temp or "ambient",
     )
 
+    cache_invalidate_pattern("ref:*")
+
     return {
         "success": True,
         "message": "Item created successfully",
@@ -194,6 +226,9 @@ def reset_inventory_data(
     deleted_transactions = repo.delete_all_transactions()
     deleted_items = repo.delete_all_items()
     deleted_locations = repo.delete_all_locations()
+
+    cache_invalidate_pattern("ref:*")
+    cache_invalidate_pattern("analytics:*")
 
     return {
         "success": True,
@@ -231,6 +266,7 @@ def add_single_transaction(
         batch_number=body.batch_number,
         expiry_date=body.expiry_date,
     )
+    cache_invalidate_pattern("ref:location_items:*")
     cache_invalidate_pattern("analytics:*")
     return result
 
@@ -265,7 +301,6 @@ def add_bulk_transactions(
         items_data=items_data,
         entered_by=str(current_user.username),
     )
+    cache_invalidate_pattern("ref:location_items:*")
     cache_invalidate_pattern("analytics:*")
     return result
-
-

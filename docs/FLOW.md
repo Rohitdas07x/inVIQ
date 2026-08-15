@@ -510,15 +510,26 @@ api/routes/vendor.py:upload_delivery
   → application/vendor_service.py:VendorService.__init__(db)
       → InventoryRepository(db)
       → InventoryService(inv_repo)
+      → InvoiceRepository(db)
   → VendorService.parse_and_process_excel
       → openpyxl.load_workbook(BytesIO)   (in-process Excel parse)
       → DB SELECT items                   (build item_lookup dict)
+      → DB SELECT latest_stocks           (pre-fetch closing stocks for location_id in 1 query)
       → [for each Excel row]
-          → InventoryService.add_transaction(flush_only=True)
-              → [same path as transaction, but no commit per row]
-      → db.commit()                       (single atomic commit)
+          → InventoryRepository.create_transaction(flush_only=True)
+              → [calculates opening/closing stock in O(1) memory, 0 DB roundtrips in loop]
+              → [accumulates line items: item_name, qty, unit, unit_price, total]
+      → db.commit()                       (single atomic commit for all transactions)
       → DB INSERT vendor_uploads          (upload record)
       → db.commit()
+      → [if success_count > 0] VendorService._generate_invoice_for_upload
+
+          → InvoiceRepository.generate_next_invoice_number (INV-YYYYMMDD-XXX)
+          → ReportLab PDF generation (InvoicePdfService.generate_invoice_pdf)
+          → Azure Blob Storage upload (AzureBlobStorageService.upload_file → invoices/YYYY/MM/...)
+          → DB INSERT vendor_invoices     (invoice record with line_items JSON + pdf_content bytes)
+          → db.commit()
+  → application/cache_service.py:cache_invalidate_pattern("analytics:*")
 ```
 
 **Branches**:
@@ -528,8 +539,32 @@ api/routes/vendor.py:upload_delivery
 - Item name not found in DB → row recorded in errors_detail, not fatal
 - Quantity ≤ 0 → row recorded in errors_detail
 - `flush_only=True` means stock alert + WebSocket queueing still happen per row (inside `add_transaction`), but commit is deferred
+- Azure Blob Storage not configured → PDF bytes stored directly in PostgreSQL `vendor_invoices.pdf_content` (stateless fallback)
 
-**Side effects**: DB writes (inventory_transactions + vendor_uploads), possible Redis cache invalidation NOT called here (⚠️ unlike direct transaction route — analytics cache stays stale after vendor upload)
+**Side effects**: DB writes (`inventory_transactions` + `vendor_uploads` + `vendor_invoices`), Azure Blob Storage upload (`invoices/YYYY/MM/INV-*.pdf`), Redis cache invalidation of all `analytics:*` keys
+
+---
+
+## GET /api/vendor/invoices  |  GET /api/vendor/invoices/{id}/pdf
+
+**Trigger**: HTTP GET, requires vendor, admin, or super_admin
+
+**Path**:
+```
+api/routes/vendor.py:list_invoices / download_invoice_pdf
+  → Depends(get_current_user) → _require_vendor_role
+  → [list_invoices]
+      → InvoiceRepository.list_invoices (DB SELECT vendor_invoices, filtered by vendor_user_id if vendor)
+  → [download_invoice_pdf]
+      → InvoiceRepository.get_by_id (DB SELECT vendor_invoices)
+      → [if Azure configured] AzureBlobStorageService.download_file(pdf_path)
+      → [fallback] Read invoice.pdf_content (DB LargeBinary bytes)
+      → [fallback] InvoicePdfService.generate_invoice_pdf (on-the-fly render)
+      → StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf")
+```
+
+**Side effects**: Streams PDF document to browser
+
 
 ---
 

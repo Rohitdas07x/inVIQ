@@ -35,17 +35,33 @@ def get_platform_overview(
     Shows total users, active/inactive counts, role breakdown, recent activity.
     """
     user_repo = UserRepository(db)
+    audit_repo = AuditRepository(db)
 
-    total_users = user_repo.count()
-    active_users = user_repo.count_filtered(is_active=True)
-    inactive_users = user_repo.count_filtered(is_active=False)
+    # Consolidated single-query aggregation across roles and active statuses (replaces 8 sequential queries)
+    from sqlalchemy import func
+    role_active_counts = (
+        db.query(User.role, User.is_active, func.count(User.id))
+        .group_by(User.role, User.is_active)
+        .all()
+    )
 
-    # Role breakdown
-    role_counts = {}
-    for role in ["admin", "manager", "staff", "vendor"]:
-        role_counts[role] = user_repo.count_filtered(role=role)
+    total_users = 0
+    active_users = 0
+    inactive_users = 0
+    role_counts = {"admin": 0, "manager": 0, "staff": 0, "vendor": 0}
 
-    # Recent signups (last 7 days)
+    for role, is_active, count in role_active_counts:
+        total_users += count
+        if is_active:
+            active_users += count
+        else:
+            inactive_users += count
+        if role in role_counts:
+            role_counts[role] += count
+        else:
+            role_counts[role] = count
+
+    # Recent signups (last 5)
     recent_users = user_repo.get_all_filtered(limit=5)
     recent_signups = [
         {
@@ -59,7 +75,6 @@ def get_platform_overview(
     ]
 
     # Recent audit events
-    audit_repo = AuditRepository(db)
     recent_events = audit_repo.get_recent(limit=10)
     recent_activity = [
         {
@@ -102,20 +117,16 @@ def get_audit_logs(
 ):
     """
     View audit trail — filterable by user, action type, or resource.
-    This is the core compliance tool for the super admin.
+    Executes filtering directly at the database engine level.
     """
     audit_repo = AuditRepository(db)
+    logs = audit_repo.get_filtered(
+        username=username,
+        action=action,
+        resource_type=resource_type,
+        limit=limit,
+    )
 
-    if username:
-        logs = audit_repo.get_by_user(username, limit=limit)
-    else:
-        logs = audit_repo.get_recent(limit=limit)
-
-    # Apply additional filters in-memory (small dataset)
-    if action:
-        logs = [l for l in logs if l.action == action]
-    if resource_type:
-        logs = [l for l in logs if l.resource_type == resource_type]
 
     return {
         "success": True,
