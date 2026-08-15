@@ -69,30 +69,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: "pip"
 
-      # Cache the virtual environment to speed up subsequent runs
-      - name: Cache Virtual Environment
-        id: cache-venv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: ${{ runner.os }}-venv-py313-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-venv-py313-
-
-      # Only install dependencies if the cache was not restored
       - name: Install dependencies
-        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
         working-directory: backend
         run: |
-          source ../.venv/bin/activate
           python -m pytest tests/ \
             --tb=short \
             --quiet \
@@ -101,6 +87,7 @@ jobs:
             --ignore=tests/test_qdrant.py \
             --ignore=tests/test_chat.py \
             -x
+
 
   # ── Job 2: Build Docker Image ───────────────────────────────────────────
   build:
