@@ -358,3 +358,141 @@ class NotificationService:
             logger.error("Unexpected error sending low-stock alerts: %s", str(e))
 
         return sent_count
+
+    @staticmethod
+    def send_admin_congratulations_email(
+        to_email: str = "bwubts23263@brainwareuniversity.ac.in",
+        username: str = "admin",
+        full_name: Optional[str] = None,
+        organization_name: Optional[str] = None,
+    ) -> bool:
+        """
+        Send a congratulations email to an Admin who just signed up in InvIQ.
+
+        Args:
+            to_email: Admin's email address (default/test: bwubts23263@brainwareuniversity.ac.in)
+            username: Admin username
+            full_name: Admin's full name (optional)
+            organization_name: Organization name (optional)
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        if not settings.SMTP_ENABLED:
+            logger.info(
+                "SMTP disabled — admin congratulations email not sent (to: %s, username: %s)",
+                mask_email(to_email),
+                username,
+            )
+            return False
+
+        if not settings.SMTP_HOST or not settings.SMTP_USER:
+            logger.warning("SMTP not configured — admin congratulations email not sent")
+            return False
+
+        try:
+            display_name = full_name or username
+            subject = "🎉 Congratulations on Joining InvIQ as Administrator!"
+            org_line = f" for <strong>{organization_name}</strong>" if organization_name else ""
+            dashboard_url = f"{settings.FRONTEND_URL or 'http://localhost:5173'}/admin/dashboard"
+
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background-color: #f8fafc; }}
+                    .wrapper {{ max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0; }}
+                    .header {{ background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #2563eb 100%); color: white; padding: 40px 30px; text-align: center; }}
+                    .header h1 {{ margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }}
+                    .header p {{ margin: 8px 0 0; opacity: 0.9; font-size: 15px; }}
+                    .badge {{ display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }}
+                    .content {{ padding: 32px 30px; }}
+                    .greeting {{ font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }}
+                    .feature-grid {{ margin: 24px 0; display: grid; gap: 12px; }}
+                    .feature-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; }}
+                    .feature-title {{ font-weight: 700; color: #4338ca; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; }}
+                    .feature-desc {{ font-size: 13px; color: #64748b; margin: 0; }}
+                    .action-box {{ text-align: center; margin: 32px 0 24px; }}
+                    .btn-primary {{ display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35); }}
+                    .footer {{ background: #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }}
+                </style>
+            </head>
+            <body>
+                <div class="wrapper">
+                    <div class="header">
+                        <div class="badge">InvIQ Administrator</div>
+                        <h1>🎉 Congratulations & Welcome!</h1>
+                        <p>Your Admin account is fully activated and ready</p>
+                    </div>
+                    <div class="content">
+                        <div class="greeting">Hello {display_name},</div>
+                        <p>
+                            Congratulations on signing up as an <strong>Administrator</strong>{org_line} on <strong>InvIQ</strong> — the intelligent healthcare supply chain and inventory management platform.
+                        </p>
+                        <p>
+                            With your Admin privileges, you have complete oversight and command of your operations:
+                        </p>
+                        <div class="feature-grid">
+                            <div class="feature-card">
+                                <div class="feature-title">📊 Multi-Location Inventory Control</div>
+                                <p class="feature-desc">Monitor real-time stock levels, batch numbers, expiry dates, and cold-chain compliance across all warehouses and clinics.</p>
+                            </div>
+                            <div class="feature-card">
+                                <div class="feature-title">🤖 AI Assistant & Semantic Memory</div>
+                                <p class="feature-desc">Ask complex operational queries, trigger automated reconciliations, and tap into conversational memory powered by Groq & Gemini.</p>
+                            </div>
+                            <div class="feature-card">
+                                <div class="feature-title">📥 AI-Powered Data Import</div>
+                                <p class="feature-desc">Instantly map and ingest vendor CSV and Excel delivery files with automated column matching and confidence gating.</p>
+                            </div>
+                            <div class="feature-card">
+                                <div class="feature-title">⚡ Requisitions & Role Access</div>
+                                <p class="feature-desc">Approve or reject stock requisition requests, invite team members, and manage staff permissions.</p>
+                            </div>
+                        </div>
+                        <div class="action-box">
+                            <a href="{dashboard_url}" class="btn-primary">Launch Admin Dashboard →</a>
+                        </div>
+                        <p style="font-size: 13px; color: #64748b; text-align: center; margin-top: 20px;">
+                            Username: <strong>{username}</strong> | Registered Email: <strong>{to_email}</strong>
+                        </p>
+                    </div>
+                    <div class="footer">
+                        <p>This automated message was sent to confirm your administrator onboarding.</p>
+                        <p>&copy; 2026 InvIQ — Intelligent Healthcare Inventory Management System</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            msg = MIMEMultipart("alternative")
+            msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL or settings.SMTP_USER}>"
+            msg["To"] = to_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(html_content, "html"))
+
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
+                server.starttls()
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.sendmail(
+                    settings.SMTP_FROM_EMAIL or settings.SMTP_USER,
+                    to_email,
+                    msg.as_string(),
+                )
+
+            logger.info(
+                "Admin congratulations email sent successfully to %s (username: %s)",
+                mask_email(to_email),
+                username,
+            )
+            return True
+
+        except smtplib.SMTPException as e:
+            logger.error("SMTP error sending admin congratulations email to %s: %s", mask_email(to_email), str(e))
+            return False
+        except Exception as e:
+            logger.error("Unexpected error sending admin congratulations email to %s: %s", mask_email(to_email), str(e))
+            return False

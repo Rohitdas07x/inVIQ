@@ -220,6 +220,13 @@ def register(
         full_name=user.full_name,
     )
 
+    if user.role == "admin":
+        NotificationService.send_admin_congratulations_email(
+            to_email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+        )
+
     # Audit log
     audit = AuditService(db.db)
     audit.log(

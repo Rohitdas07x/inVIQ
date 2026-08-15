@@ -158,6 +158,12 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str = ""
     SARVAM_API_KEY: str = ""
 
+    # ── Azure Blob Storage (General PDF & Document Storage) ────────────
+    AZURE_STORAGE_CONNECTION_STRING: Optional[str] = None
+    AZURE_STORAGE_CONTAINER_NAME: str = "inviq-documents"
+    AZURE_STORAGE_ACCOUNT_NAME: Optional[str] = None
+    AZURE_STORAGE_ACCOUNT_KEY: Optional[str] = None
+
     # ── Data Import (AI-powered CSV/Excel column mapping) ──────────────
     # Confidence threshold applied to most mapped fields (0.0–1.0).
     # Rows/fields below this score are quarantined, never auto-written.

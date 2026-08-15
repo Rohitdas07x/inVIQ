@@ -252,6 +252,15 @@ def create_org_admin(
     db.commit()
     db.refresh(user)
 
+    # Send congratulations email to the newly created admin
+    from app.application.notification_service import NotificationService
+    NotificationService.send_admin_congratulations_email(
+        to_email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+        organization_name=org.name,
+    )
+
     # Audit log
     audit = AuditService(db)
     audit.log(
