@@ -75,18 +75,29 @@ def get_summary(
     return result
 
 
+from fastapi import APIRouter, Depends, Request, Query
+
 @router.get("/dashboard/stats")
 @limiter.limit("30/minute")
 def get_dashboard_stats(
     request: Request,
+    location_id: Optional[int] = Query(None),
+    category: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cache_key = "analytics:dashboard_stats"
+    org_id = current_user.org_id if current_user.role != "super_admin" else None
+    cache_key = f"analytics:dashboard_stats:{org_id}:{location_id}:{category}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    result = AnalyticsService.get_dashboard_stats(db)
+    result = AnalyticsService.get_dashboard_stats(
+        db,
+        org_id=org_id,
+        location_id=location_id,
+        category=category,
+    )
     cache_set(cache_key, result, ttl=DASHBOARD_TTL)
     return result
+

@@ -50,11 +50,12 @@ from app.api.graphql.types import (
 logger = logging.getLogger("smart_inventory.graphql")
 
 # Roles that may receive the privileged forecasting fields.
-_PRIVILEGED_ROLES = {"manager", "admin", "super_admin"}
+_PRIVILEGED_ROLES = {"admin", "super_admin"}
 
 
 def _is_privileged(user) -> bool:
-    """Return True when the caller is manager-level or above."""
+    """Return True when the caller is admin-level or above."""
+
     if user is None:
         return False
     return user.role in _PRIVILEGED_ROLES

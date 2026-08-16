@@ -14,15 +14,16 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.connection import get_db
-from app.core.dependencies import get_optional_user
+from app.core.dependencies import get_current_user
 from app.infrastructure.database.models import User
 
 
 async def get_graphql_context(
     request: Request,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ) -> dict:
+
     """
     Strawberry context getter — injected into every query resolver via
     ``info.context``.

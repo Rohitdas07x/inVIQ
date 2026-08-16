@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
+
 
 
 class UserBase(BaseModel):
@@ -12,6 +13,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=100)
     role: str = Field(default="staff")
+    location_ids: Optional[List[int]] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
@@ -20,6 +22,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    location_ids: Optional[List[int]] = None
 
 
 class UserProfileUpdate(BaseModel):
@@ -37,7 +40,10 @@ class AdminPasswordReset(BaseModel):
 
 class UserResponse(UserBase):
     id: int
+    org_id: Optional[int] = None
     role: str
+    location_ids: Optional[List[int]] = None
+    organization_name: Optional[str] = None
     is_active: bool
     is_verified: bool
     last_login_at: Optional[datetime] = None
@@ -45,6 +51,7 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
 
 
 class Token(BaseModel):
@@ -60,8 +67,19 @@ class TokenPayload(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
+    email: str = Field(..., min_length=3, max_length=255)
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        clean = (v or "").strip().lower()
+        if "@" not in clean or len(clean.split("@")) != 2 or not clean.split("@")[0] or not clean.split("@")[1]:
+            raise ValueError("A valid email address containing '@' is required")
+        return clean
+
+
+
 
 
 class RefreshTokenRequest(BaseModel):
@@ -93,6 +111,3 @@ class PasswordResetConfirmRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     id_token: str
 
-
-class GithubAuthRequest(BaseModel):
-    code: str

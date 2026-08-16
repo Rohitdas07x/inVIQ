@@ -6,17 +6,17 @@ No direct DB queries here — everything goes through the service layer.
 """
 
 from fastapi import APIRouter, Depends, Request
-from app.core.rate_limiter import limiter
 from typing import Optional
-
+from app.core.rate_limiter import limiter
 from app.core.dependencies import (
+
     get_inventory_service,
     get_inventory_repo,
     get_current_user,
-    get_optional_user,
     require_staff,
     require_admin,
 )
+
 from app.core.exceptions import (
     NotFoundError,
     DuplicateError,
@@ -36,6 +36,7 @@ from app.api.schemas.inventory_schemas import (
     CreateLocationRequest,
     CreateItemRequest,
     ResetDataRequest,
+    ScanDispenseRequest,
 )
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -43,16 +44,18 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 @router.get("/locations")
 def get_all_locations(
+    limit: int = 50,
+    offset: int = 0,
     repo: InventoryRepository = Depends(get_inventory_repo),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all locations with a 5-minute Redis cache."""
-    cache_key = "ref:locations"
+    """List all locations with pagination and 5-minute tiered cache."""
+    cache_key = f"ref:locations:{limit}:{offset}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    locations = repo.get_all_locations()
+    locations = repo.get_all_locations(limit=limit, offset=offset)
     res = {
         "success": True,
         "data": [
@@ -61,35 +64,47 @@ def get_all_locations(
         ],
     }
     cache_set(cache_key, res, ttl=300)
+    if limit == 50 and offset == 0:
+        cache_set("ref:locations", res, ttl=300)
     return res
 
 
 @router.get("/items")
 def get_all_items(
+    limit: int = 50,
+    offset: int = 0,
     repo: InventoryRepository = Depends(get_inventory_repo),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all catalog items with a 5-minute Redis cache."""
-    cache_key = "ref:items"
+    """List all inventory items with pagination and 5-minute tiered cache."""
+    cache_key = f"ref:items:{limit}:{offset}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    items = repo.get_all_items()
+    items = repo.get_all_items(limit=limit, offset=offset)
     res = {
         "success": True,
         "data": [
             {
-                "id": item.id,
-                "name": item.name,
-                "category": item.category,
-                "unit": item.unit,
+                "id": it.id,
+                "name": it.name,
+                "category": it.category,
+                "storage_temp": it.storage_temp,
+                "strength": it.strength,
+                "unit": it.unit,
+                "min_stock": it.min_stock,
+                "barcode": it.barcode,
             }
-            for item in items
+            for it in items
         ],
     }
     cache_set(cache_key, res, ttl=300)
+    if limit == 50 and offset == 0:
+        cache_set("ref:items", res, ttl=300)
     return res
+
+
 
 
 @router.get("/location/{location_id}/items")
@@ -97,7 +112,7 @@ def get_location_items(
     location_id: int,
     repo: InventoryRepository = Depends(get_inventory_repo),
     service: InventoryService = Depends(get_inventory_service),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get location item stock list with a 5-minute Redis cache."""
     cache_key = f"ref:location_items:{location_id}"
@@ -124,9 +139,10 @@ def get_current_stock(
     location_id: int,
     item_id: int,
     service: InventoryService = Depends(get_inventory_service),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
     stock = service.get_latest_stock(location_id, item_id)
+
 
     if stock is None:
         return {
@@ -304,3 +320,38 @@ def add_bulk_transactions(
     cache_invalidate_pattern("ref:location_items:*")
     cache_invalidate_pattern("analytics:*")
     return result
+
+
+@router.post("/scan-dispense")
+@limiter.limit("60/minute")
+def scan_dispense_item(
+    request: Request,
+    body: ScanDispenseRequest,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    service: InventoryService = Depends(get_inventory_service),
+    current_user: User = Depends(require_staff),
+):
+    """
+    High-speed barcode dispense for pharmacy retail counters.
+    Validates barcode, selects earliest-expiring active batch (FEFO order),
+    atomically decrements stock, records transaction, and broadcasts real-time updates.
+    """
+    location = repo.get_location_by_id(body.location_id)
+    if not location:
+        raise NotFoundError("Location", body.location_id)
+
+    # Scoped staff validation: if user has assigned location_ids, check authorization
+    if current_user.role == "staff" and current_user.location_ids:
+        if body.location_id not in current_user.location_ids:
+            from app.core.exceptions import AuthorizationError
+            raise AuthorizationError(f"Staff account is not authorized to dispense at Location #{body.location_id}")
+
+
+    return service.dispense_by_barcode(
+        barcode_or_id=body.barcode,
+        location_id=body.location_id,
+        quantity=body.quantity,
+        entered_by=str(current_user.username),
+        org_id=current_user.org_id if current_user.role != "super_admin" else None,
+    )
+

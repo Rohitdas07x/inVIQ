@@ -9,6 +9,7 @@ Provides AI-powered chat for inventory queries with:
 - Chat session ownership enforcement
 """
 
+import time
 from fastapi import APIRouter, Depends, Request, UploadFile, File
 from app.core.rate_limiter import limiter
 from app.core.exceptions import (
@@ -18,7 +19,9 @@ from app.core.exceptions import (
     DatabaseError,
     AuthorizationError,
 )
-from app.core.dependencies import get_current_user, get_optional_user
+
+from app.core.dependencies import get_current_user
+
 from app.infrastructure.database.models import User
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -63,12 +66,13 @@ def _get_conversation_history(db: Session, conversation_id: str, limit: int = 10
     return [{"role": msg.role, "content": msg.content} for msg in recent]
 
 
-def _get_vector_context(question: str, conversation_id: str = "") -> str:
-    """Retrieve relevant past context from vector memory."""
+def _get_vector_context(question: str, conversation_id: str = "") -> tuple[str, float]:
+    """Retrieve relevant past context from vector memory with execution duration in ms."""
+    t0 = time.perf_counter()
     try:
         memory = get_vector_memory()
         if not memory.is_available:
-            return ""
+            return "", (time.perf_counter() - t0) * 1000
 
         matches = memory.search_relevant(
             query=question,
@@ -77,7 +81,7 @@ def _get_vector_context(question: str, conversation_id: str = "") -> str:
         )
 
         if not matches:
-            return ""
+            return "", (time.perf_counter() - t0) * 1000
 
         context_parts = []
         for m in matches:
@@ -85,10 +89,10 @@ def _get_vector_context(question: str, conversation_id: str = "") -> str:
                 f"[{m['timestamp']}] ({m['role']}): {m['content'][:300]}"
             )
 
-        return "\n".join(context_parts)
+        return "\n".join(context_parts), (time.perf_counter() - t0) * 1000
     except Exception as e:
         logger.warning("Vector memory retrieval failed: %s", e)
-        return ""
+        return "", (time.perf_counter() - t0) * 1000
 
 
 def _is_greeting(text: str) -> bool:
@@ -108,47 +112,59 @@ def _build_agent_response(
     question: str, db: Session, conversation_id: Optional[str] = None
 ) -> dict:
     """Try LLM agent first, fall back to rule-based if unavailable."""
+    rag_start = time.perf_counter()
     set_db_session(db)
 
-    # ── Bypass empty-DB check for greetings / small-talk ──────────────────
-    # Only check DB content for actual inventory questions.
-    if not _is_greeting(question):
-        overview = get_inventory_overview.invoke({})
-        if isinstance(overview, dict) and not overview.get("has_data"):
-            return {
-                "success": True,
-                "response": (
-                    "Your inventory database is currently empty. "
-                    "Please add locations, items, and stock transactions from the "
-                    "**Data Entry** page first, then I can help you analyse them."
-                ),
-                "question": question,
-            }
-
-    # Gather context
-    past_context = _get_vector_context(question, conversation_id or "")
+    # Stage 1: Vector Retrieval Timing
+    past_context, vector_retrieval_ms = _get_vector_context(question, conversation_id or "")
     history = []
     if conversation_id:
         history = _get_conversation_history(db, conversation_id, limit=6)
 
+
     # ── Try LLM agent first ────────────────────────────────────────────
+    llm_inference_ms = 0.0
     if is_agent_available():
         try:
+            llm_t0 = time.perf_counter()
             response_text = invoke_agent(
                 question=question,
                 conversation_history=history,
                 vector_context=past_context,
             )
+            llm_inference_ms = (time.perf_counter() - llm_t0) * 1000
+            total_rag_ms = (time.perf_counter() - rag_start) * 1000
+
+            logger.info(
+                "🤖 AI RAG Latency Breakdown | Vector Retrieval: %.2fms | LLM Inference: %.2fms | Total RAG: %.2fms",
+                vector_retrieval_ms,
+                llm_inference_ms,
+                total_rag_ms,
+            )
+
             return {
                 "success": True,
                 "response": response_text,
                 "question": question,
+                "timings": {
+                    "vector_retrieval_ms": round(vector_retrieval_ms, 2),
+                    "llm_inference_ms": round(llm_inference_ms, 2),
+                    "total_rag_ms": round(total_rag_ms, 2),
+                },
             }
         except RuntimeError as e:
             logger.warning("LLM agent failed, falling back to rule-based: %s", e)
 
     # ── Rule-based fallback ────────────────────────────────────────────
-    return _rule_based_response(question, past_context)
+    total_rag_ms = (time.perf_counter() - rag_start) * 1000
+    res = _rule_based_response(question, past_context)
+    res["timings"] = {
+        "vector_retrieval_ms": round(vector_retrieval_ms, 2),
+        "llm_inference_ms": 0.0,
+        "total_rag_ms": round(total_rag_ms, 2),
+    }
+    return res
+
 
 
 
@@ -373,8 +389,9 @@ def clear_chat_history(
 
 @router.get("/suggestions")
 def get_question_suggestions(
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
+
     return {
         "success": True,
         "suggestions": [
@@ -454,10 +471,10 @@ async def transcribe_audio(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Transcribe spoken audio to text using Sarvam AI (saaras:v3).
+    Transcribe spoken English audio to text using Sarvam AI Saaras v3 STT.
 
-    Supports English and all 22 scheduled Indian languages.
-    Audio is auto-detected to allow users to speak in any language.
+    Flow: Spoken audio → Sarvam STT (language_code="en-IN", mode="transcribe") → English text.
+    The resulting English text feeds directly into the existing inventory RAG pipeline.
     """
     if not settings.SARVAM_API_KEY:
         raise ValidationError("Sarvam AI API key is not configured on the server")
@@ -473,14 +490,14 @@ async def transcribe_audio(
             file=(file.filename or "audio.webm", content, file.content_type or "audio/webm"),
             model="saaras:v3",
             mode="transcribe",
-            language_code="unknown",   # auto-detect — user may speak English or any Indian language
+            language_code="en-IN",
             input_audio_codec="webm",
         )
 
         transcribed_text = (response.transcript or "").strip()
 
         logger.info(
-            "Sarvam transcription complete for user=%s length=%d",
+            "Sarvam English STT complete for user=%s length=%d",
             current_user.username,
             len(transcribed_text),
         )
@@ -493,4 +510,5 @@ async def transcribe_audio(
     except Exception as e:
         logger.error("Sarvam STT error user=%s: %s", current_user.username, str(e))
         raise ValidationError(f"Transcription failed: {str(e)}")
+
 

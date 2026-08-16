@@ -34,6 +34,12 @@ def get_platform_overview(
     Super Admin overview — quick stats for the entire platform.
     Shows total users, active/inactive counts, role breakdown, recent activity.
     """
+    from app.application.cache_service import cache_get, cache_set
+    cache_key = f"ref:admin_overview:{current_user.org_id or 0}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     user_repo = UserRepository(db)
     audit_repo = AuditRepository(db)
 
@@ -45,10 +51,12 @@ def get_platform_overview(
         .all()
     )
 
+
     total_users = 0
     active_users = 0
     inactive_users = 0
-    role_counts = {"admin": 0, "manager": 0, "staff": 0, "vendor": 0}
+    role_counts = {"admin": 0, "staff": 0, "vendor": 0}
+
 
     for role, is_active, count in role_active_counts:
         total_users += count
@@ -88,7 +96,7 @@ def get_platform_overview(
         for e in recent_events
     ]
 
-    return {
+    res = {
         "success": True,
         "data": {
             "users": {
@@ -101,6 +109,9 @@ def get_platform_overview(
             "recent_activity": recent_activity,
         },
     }
+    cache_set(cache_key, res, ttl=30)
+    return res
+
 
 
 # ── GET /admin/audit-logs ─────────────────────────────────────────────────
@@ -198,6 +209,187 @@ def get_users_summary(
             },
         },
     }
+
+
+# ── SUPPLIER / DISTRIBUTOR MANAGEMENT ─────────────────────────────────────
+
+from pydantic import BaseModel, Field, EmailStr
+from app.core.security import hash_password
+from app.core.exceptions import ValidationError, NotFoundError
+from app.infrastructure.database.models import VendorUpload, VendorInvoice
+
+
+class SupplierCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=200, description="Distributor / wholesaler business name")
+    username: str = Field(..., min_length=3, max_length=100)
+    email: EmailStr
+    password: Optional[str] = Field("vendor123", min_length=6, max_length=100)
+    phone: Optional[str] = None
+    location_ids: Optional[list] = None
+
+
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=200)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    location_ids: Optional[list] = None
+    is_active: Optional[bool] = None
+
+
+@router.get("/suppliers", response_model=dict)
+def list_suppliers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    List all medicine distributors / suppliers for the current medical store organization.
+    """
+    query = db.query(User).filter(User.role == "vendor")
+    if current_user.org_id:
+        query = query.filter(User.org_id == current_user.org_id)
+
+    vendors = query.order_by(User.created_at.desc()).all()
+
+    data = []
+    for v in vendors:
+        uploads_count = db.query(VendorUpload).filter(VendorUpload.vendor_user_id == v.id).count()
+        invoices_count = db.query(VendorInvoice).filter(VendorInvoice.vendor_user_id == v.id).count()
+        data.append({
+            "id": v.id,
+            "name": v.full_name or v.username,
+            "username": v.username,
+            "email": v.email,
+            "role": v.role,
+            "location_ids": v.location_ids or [],
+            "is_active": v.is_active,
+            "total_uploads": uploads_count,
+            "total_invoices": invoices_count,
+            "last_login_at": str(v.last_login_at) if v.last_login_at else None,
+            "created_at": str(v.created_at) if v.created_at else None,
+        })
+
+    return {
+        "success": True,
+        "data": data,
+        "total": len(data),
+    }
+
+
+@router.post("/suppliers", response_model=dict)
+def create_supplier(
+    body: SupplierCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Add a new medicine distributor / supplier to the medical store organization.
+    """
+    # Check duplicate username or email
+    existing_user = db.query(User).filter(
+        (User.username == body.username) | (User.email == body.email)
+    ).first()
+    if existing_user:
+        raise ValidationError("A supplier with this username or email already exists")
+
+    pwd = body.password or "vendor123"
+    supplier = User(
+        org_id=current_user.org_id,
+        username=body.username,
+        email=body.email,
+        full_name=body.name,
+        hashed_password=hash_password(pwd),
+        role="vendor",
+        location_ids=body.location_ids or [],
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+
+    return {
+        "success": True,
+        "message": f"Supplier '{supplier.full_name}' created successfully",
+        "data": {
+            "id": supplier.id,
+            "name": supplier.full_name,
+            "username": supplier.username,
+            "email": supplier.email,
+            "role": supplier.role,
+            "is_active": supplier.is_active,
+            "created_at": str(supplier.created_at) if supplier.created_at else None,
+        },
+    }
+
+
+@router.put("/suppliers/{supplier_id}", response_model=dict)
+def update_supplier(
+    supplier_id: int,
+    body: SupplierUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Update details for a specific medicine supplier.
+    """
+    query = db.query(User).filter(User.id == supplier_id, User.role == "vendor")
+    if current_user.org_id:
+        query = query.filter(User.org_id == current_user.org_id)
+
+    supplier = query.first()
+    if not supplier:
+        raise NotFoundError(f"Supplier with ID {supplier_id} not found")
+
+    if body.name is not None:
+        supplier.full_name = body.name
+    if body.email is not None:
+        supplier.email = body.email
+    if body.location_ids is not None:
+        supplier.location_ids = body.location_ids
+    if body.is_active is not None:
+        supplier.is_active = body.is_active
+
+    db.commit()
+    db.refresh(supplier)
+
+    return {
+        "success": True,
+        "message": f"Supplier '{supplier.full_name}' updated successfully",
+        "data": {
+            "id": supplier.id,
+            "name": supplier.full_name,
+            "username": supplier.username,
+            "email": supplier.email,
+            "is_active": supplier.is_active,
+        },
+    }
+
+
+@router.delete("/suppliers/{supplier_id}", response_model=dict)
+def delete_supplier(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Deactivate or remove a medicine supplier.
+    """
+    query = db.query(User).filter(User.id == supplier_id, User.role == "vendor")
+    if current_user.org_id:
+        query = query.filter(User.org_id == current_user.org_id)
+
+    supplier = query.first()
+    if not supplier:
+        raise NotFoundError(f"Supplier with ID {supplier_id} not found")
+
+    supplier.is_active = False
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Supplier '{supplier.full_name}' deactivated successfully",
+    }
+
 
 
 # ── GET /admin/reports/generate ────────────────────────────────────────────

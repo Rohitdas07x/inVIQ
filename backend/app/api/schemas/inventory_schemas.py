@@ -52,3 +52,11 @@ class CreateItemRequest(BaseModel):
 
 class ResetDataRequest(BaseModel):
     confirm: bool = False
+
+
+class ScanDispenseRequest(BaseModel):
+    barcode: str = Field(min_length=1, max_length=100, description="Medicine barcode, EAN-13, or numeric item ID")
+    location_id: int = Field(gt=0, description="Counter / Branch location ID")
+    quantity: int = Field(default=1, gt=0, description="Number of units/strips to dispense")
+    notes: Optional[str] = None
+

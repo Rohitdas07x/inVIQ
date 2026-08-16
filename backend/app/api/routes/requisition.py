@@ -11,9 +11,8 @@ from app.core.rate_limiter import limiter
 from app.core.dependencies import (
     get_requisition_service,
     get_current_user,
-    get_optional_user,
     require_staff,
-    require_manager,
+    require_admin,
 )
 from app.core.exceptions import NotFoundError
 from app.application.requisition_service import RequisitionService
@@ -43,7 +42,7 @@ def create_requisition(
 
     return service.create_requisition(
         location_id=body.location_id,
-        requested_by=current_user.username,
+        requested_by=str(current_user.username),
         department=body.department,
         urgency=body.urgency,
         items=items_data,
@@ -59,7 +58,7 @@ def list_requisitions(
     skip: int = 0,
     limit: int = 20,
     service: RequisitionService = Depends(get_requisition_service),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
     if limit > 100:
         limit = 100
@@ -83,7 +82,7 @@ def list_requisitions(
 @router.get("/stats")
 def get_requisition_stats(
     service: RequisitionService = Depends(get_requisition_service),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
     stats = service.get_stats()
     return {"success": True, "data": stats}
@@ -93,7 +92,7 @@ def get_requisition_stats(
 def get_requisition(
     requisition_id: int,
     service: RequisitionService = Depends(get_requisition_service),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
 ):
     data = service.get_requisition(requisition_id)
     if not data:
@@ -108,7 +107,7 @@ def approve_requisition(
     request: Request,
     body: ApproveRequest,
     service: RequisitionService = Depends(get_requisition_service),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_admin),
 ):
     return service.approve_requisition(
         requisition_id=requisition_id,
@@ -124,13 +123,14 @@ def reject_requisition(
     request: Request,
     body: RejectRequest,
     service: RequisitionService = Depends(get_requisition_service),
-    current_user: User = Depends(require_manager),
+    current_user: User = Depends(require_admin),
 ):
     return service.reject_requisition(
         requisition_id=requisition_id,
         rejected_by=str(current_user.username),
         reason=body.reason,
     )
+
 
 
 @router.put("/{requisition_id}/cancel")

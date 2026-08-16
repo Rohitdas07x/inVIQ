@@ -35,6 +35,25 @@ def seed_admin_user():
         from app.infrastructure.database.connection import SessionLocal
 
         with SessionLocal() as db:
+            # Seed Super Admin
+            existing_super_admin = db.query(User).filter(User.role == "super_admin").first()
+            if not existing_super_admin:
+                super_admin_user = User(
+                    email=settings.SUPER_ADMIN_EMAIL or "sayandip@inviq.io",
+                    username="superadmin",
+                    hashed_password=hash_password("superadmin123"),
+                    full_name="Global Super Admin",
+                    role="super_admin",
+                    is_active=True,
+                    is_verified=True,
+                )
+                db.add(super_admin_user)
+                db.commit()
+                logger.info("Default super_admin created (username: superadmin, email: %s)", super_admin_user.email)
+            else:
+                logger.info("Super admin user already exists")
+
+            # Seed Admin
             existing_admin = db.query(User).filter(User.role == "admin").first()
             if not existing_admin:
                 admin_user = User(
@@ -54,7 +73,8 @@ def seed_admin_user():
             else:
                 logger.info("Admin user already exists")
     except Exception as e:
-        logger.warning("Could not seed admin user: %s", str(e))
+        logger.warning("Could not seed admin/super_admin user: %s", str(e))
+
 
 
 # ── Lifespan (Graceful Startup + Shutdown) ─────────────────────────────────
@@ -66,6 +86,12 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     seed_admin_user()
     get_redis()  # Initialize Redis connection (logs status)
+
+    # Start WebSocket Redis pub/sub subscriber background task
+    import asyncio
+    from app.api.routes.websocket import start_redis_subscriber
+    subscriber_task = asyncio.create_task(start_redis_subscriber())
+
     logger.info(
         "[START] %s v%s — %d route groups loaded (+ GraphQL at /graphql/analytics)",
         settings.PROJECT_NAME,
@@ -74,9 +100,11 @@ async def lifespan(app: FastAPI):
     )
     yield
     # ── Shutdown ──
+    subscriber_task.cancel()
     close_redis()
     engine.dispose()
     logger.info("[STOP] %s shutdown complete", settings.PROJECT_NAME)
+
 
 
 app = FastAPI(
@@ -158,10 +186,10 @@ def health_check():
 def public_config():
     """Return non-sensitive config values that the frontend needs at boot time.
 
-    Only the Google and GitHub Client IDs (public by nature) are exposed here.
+    Only the Google Client ID (public by nature) is exposed here.
     Client Secrets are NEVER returned.
     """
     return {
         "google_client_id": settings.GOOGLE_CLIENT_ID or "",
-        "github_client_id": settings.GITHUB_CLIENT_ID or "",
     }
+

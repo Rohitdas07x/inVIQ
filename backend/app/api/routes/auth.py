@@ -23,7 +23,7 @@ from app.core.security import (
     hash_password,
     mask_email,
 )
-from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError
+from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError, DuplicateError
 from app.infrastructure.database.user_repo import UserRepository
 from app.infrastructure.database.models import User
 from app.application.audit_service import AuditService
@@ -41,8 +41,8 @@ from app.api.schemas.auth_schemas import (
     VerifyEmailRequest,
     PasswordResetConfirmRequest,
     GoogleAuthRequest,
-    GithubAuthRequest,
 )
+
 
 import secrets
 import smtplib
@@ -167,12 +167,18 @@ def _send_password_reset_email(user: User) -> bool:
 
 def _user_dict(user: User) -> dict:
     """Standard user data payload reused across endpoints."""
+    org_name = None
+    if user.organization:
+        org_name = user.organization.name
     return {
         "id": user.id,
         "email": user.email,
         "username": user.username,
         "full_name": user.full_name,
         "role": user.role,
+        "org_id": user.org_id,
+        "organization_name": org_name,
+        "location_ids": user.location_ids or [],
         "is_active": user.is_active,
         "is_verified": user.is_verified,
         "last_login_at": str(user.last_login_at) if user.last_login_at else None,
@@ -198,10 +204,13 @@ def register(
     db: Session = Depends(get_user_repo),
     current_user: User = Depends(require_admin),
 ):
-    if request_body.role not in ["admin", "manager", "staff", "vendor"]:
+    if request_body.role not in ["admin", "staff", "vendor"]:
         raise ValidationError(
-            f"Invalid role: {request_body.role}. Must be admin, manager, staff, or vendor"
+            f"Invalid role: {request_body.role}. Must be admin, staff, or vendor"
         )
+
+    # Allocate new staff / vendor strictly to the current admin's pharmacy organization
+    target_org_id = current_user.org_id
 
     user = db.create(
         email=request_body.email,
@@ -209,7 +218,10 @@ def register(
         password=request_body.password,
         full_name=request_body.full_name,
         role=request_body.role,
+        org_id=target_org_id,
+        location_ids=request_body.location_ids or [],
     )
+
 
     # Send welcome email with credentials
     email_sent = NotificationService.send_welcome_email(
@@ -251,7 +263,103 @@ def register(
     }
 
 
+# ── POST /signup ───────────────────────────────────────────────────────────
+
+
+@router.post("/signup", response_model=dict)
+@limiter.limit("5/minute")
+def signup(
+    request_body: UserCreate,
+    request: Request,
+    db: Session = Depends(get_user_repo),
+):
+    """
+    Public self-registration endpoint for new users.
+    Creates a new user account.
+    """
+    if db.get_by_email(request_body.email):
+        raise DuplicateError("A user with this email already exists")
+    if db.get_by_username(request_body.username):
+        raise DuplicateError("A user with this username already exists")
+
+    role = request_body.role if request_body.role in ["admin", "staff", "vendor"] else "admin"
+
+    org_id = None
+    org_name = None
+    default_location_id = None
+    if role == "admin":
+        from app.infrastructure.database.models import Organization, Location
+        base_slug = request_body.username.lower().replace(" ", "-").replace(".", "-")
+        slug = base_slug
+        counter = 1
+        while db.db.query(Organization).filter(Organization.slug == slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+
+        org_name = f"{request_body.full_name or request_body.username}'s Pharmacy & Medical Store"
+        new_org = Organization(name=org_name, slug=slug, is_active=True)
+        db.db.add(new_org)
+        db.db.commit()
+        db.db.refresh(new_org)
+        org_id = new_org.id
+
+        # Create initial default counter location
+        default_location = Location(
+            org_id=new_org.id,
+            name=f"{request_body.full_name or request_body.username} - Main Counter",
+            type="retail_counter",
+            region="Default Region",
+            address="Main Store Location",
+        )
+        db.db.add(default_location)
+        db.db.commit()
+        db.db.refresh(default_location)
+        default_location_id = default_location.id
+
+    user = db.create(
+        email=request_body.email,
+        username=request_body.username,
+        password=request_body.password,
+        full_name=request_body.full_name,
+        role=role,
+        org_id=org_id,
+        location_ids=[default_location_id] if default_location_id else (request_body.location_ids or []),
+    )
+
+
+    if user.role == "admin":
+        NotificationService.send_admin_congratulations_email(
+            to_email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+            organization_name=org_name,
+        )
+
+
+    # Audit log
+    audit = AuditService(db.db)
+    audit.log(
+        username=user.username,
+        action="USER_SELF_REGISTERED",
+        resource_type="user",
+        resource_id=str(user.id),
+        user_id=user.id,
+        details={
+            "username": user.username,
+            "role": user.role,
+        },
+        ip_address=_get_client_ip(request),
+    )
+
+    return {
+        "success": True,
+        "message": "Account created successfully. You can now log in.",
+        "data": _user_dict(user),
+    }
+
+
 # ── POST /login ────────────────────────────────────────────────────────────
+
 
 
 @router.post("/login", response_model=dict)
@@ -261,9 +369,13 @@ def login(
     request: Request,
     db: Session = Depends(get_user_repo),
 ):
-    user = db.get_by_username(request_body.username)
-    # NOTE: we do NOT raise early if user is None — that would leak username
+    # Strictly lookup ONLY by email address (case-insensitive)
+    login_email = str(request_body.email).strip().lower()
+    user = db.get_by_email(login_email)
+
+    # NOTE: we do NOT raise early if user is None — that would leak email
     # existence via timing. authenticate_user() runs a dummy hash in that case.
+
 
     # Check account lockout (only if user exists)
     if user and user.locked_until:
@@ -278,8 +390,6 @@ def login(
             db.reset_login_attempts(user)
 
     # ── Verify password (timing-safe via authenticate_user) ─────────────
-    # authenticate_user always runs a dummy hash if user is None,
-    # preventing username enumeration via response timing differences.
     if not authenticate_user(user, request_body.password):
         if user is not None:
             db.increment_login_attempts(user)
@@ -306,10 +416,11 @@ def login(
                     f"Account locked for {LOCKOUT_DURATION_MINUTES} minutes due to too many failed attempts."
                 )
 
-        raise AuthenticationError("Invalid username or password")
+        raise AuthenticationError("Invalid email or password")
 
     if not user.is_active:
         raise AuthenticationError("User account is disabled")
+
 
     # Successful login — record it and reset attempts
     db.record_login(user)
@@ -551,13 +662,15 @@ def list_users(
     db: Session = Depends(get_user_repo),
     current_user: User = Depends(require_admin),
 ):
-    if role and role not in ["admin", "manager", "staff", "vendor"]:
+    if role and role not in ["admin", "staff", "vendor"]:
         raise ValidationError(f"Invalid role filter: {role}")
     if limit > 100:
         limit = 100  # Cap to prevent abuse
 
-    users = db.get_all_filtered(role=role, is_active=is_active, skip=skip, limit=limit)
-    total = db.count_filtered(role=role, is_active=is_active)
+    target_org_id = current_user.org_id if current_user.role == "admin" else None
+    users = db.get_all_filtered(role=role, is_active=is_active, org_id=target_org_id, skip=skip, limit=limit)
+    total = db.count_filtered(role=role, is_active=is_active, org_id=target_org_id)
+
 
     return {
         "success": True,
@@ -606,8 +719,9 @@ def update_user_role(
     if not user:
         raise NotFoundError("User", user_id)
 
-    if request_body.role not in ["admin", "manager", "staff", "vendor"]:
+    if request_body.role not in ["admin", "staff", "vendor"]:
         raise ValidationError(f"Invalid role: {request_body.role}")
+
 
     old_role = user.role
     user.role = request_body.role
@@ -1014,27 +1128,59 @@ def google_auth(
                 },
             }
 
-        # New user - create account (auto-registered)
+        # New user - create account as Pharmacy Store Owner (Admin)
+        from app.infrastructure.database.models import Organization, Location
+        import secrets
+
         # Generate a unique username from email
-        base_username = google_email.split("@")[0]
+        base_username = google_email.split("@")[0].lower().replace(".", "_")
         username = base_username
         counter = 1
         while db.get_by_username(username):
-            username = f"{base_username}{counter}"
+            username = f"{base_username}_{counter}"
             counter += 1
 
-        # Create user with Google OAuth flag
+        # Create Organization for this Chemist Store Owner
+        base_slug = username.replace("_", "-")
+        slug = base_slug
+        counter = 1
+        while db.db.query(Organization).filter(Organization.slug == slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+
+        org_name = f"{google_name or username}'s Pharmacy & Medical Store"
+        new_org = Organization(name=org_name, slug=slug, is_active=True)
+        db.db.add(new_org)
+        db.db.commit()
+        db.db.refresh(new_org)
+
+        # Create default Main Pharmacy Counter location
+        default_location = Location(
+            org_id=new_org.id,
+            name=f"{google_name or username} - Main Counter",
+            type="retail_counter",
+            region="Default Region",
+            address="Main Store Location",
+        )
+        db.db.add(default_location)
+        db.db.commit()
+        db.db.refresh(default_location)
+
+        # Create user with Google OAuth flag as Admin
         user = db.create(
             email=google_email,
             username=username,
-            password=hash_password(secrets.token_urlsafe(32)),  # Random password
+            password=secrets.token_urlsafe(32),  # Random secure password
             full_name=google_name,
-            role="staff",  # Default role for self-registered users
+            role="admin",  # Pharmacy Owner / Store Admin
+            org_id=new_org.id,
+            location_ids=[default_location.id],
         )
 
         user.is_verified = True
         user.is_active = True
         db.update(user)
+
 
         access_token = create_access_token(
             {
@@ -1074,181 +1220,3 @@ def google_auth(
         logger.error(f"Google OAuth error: {e}")
         raise AuthenticationError("Failed to verify Google account")
 
-
-# ── POST /github-auth ──────────────────────────────────────────────────────
-
-
-@router.post("/github-auth", response_model=dict)
-@limiter.limit("10/minute")
-def github_auth(
-    request: Request,
-    request_body: GithubAuthRequest,
-    db: Session = Depends(get_user_repo),
-):
-    """Authenticate or register user via GitHub OAuth."""
-    if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
-        raise AuthenticationError("GitHub OAuth is not configured on the server")
-
-    try:
-        # Step 1: Exchange code for GitHub access token
-        token_resp = httpx.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": settings.GITHUB_CLIENT_ID,
-                "client_secret": settings.GITHUB_CLIENT_SECRET,
-                "code": request_body.code,
-            },
-            timeout=10,
-        )
-
-        if token_resp.status_code != 200:
-            raise AuthenticationError("Failed to exchange GitHub authorization code")
-
-        token_data = token_resp.json()
-        gh_access_token = token_data.get("access_token")
-        if not gh_access_token:
-            error_desc = token_data.get("error_description", "Invalid GitHub authorization code")
-            raise AuthenticationError(error_desc)
-
-        # Step 2: Fetch user profile from GitHub
-        user_resp = httpx.get(
-            "https://api.github.com/user",
-            headers={
-                "Authorization": f"Bearer {gh_access_token}",
-                "Accept": "application/json",
-                "User-Agent": "InvIQ-Auth",
-            },
-            timeout=10,
-        )
-
-        if user_resp.status_code != 200:
-            raise AuthenticationError("Failed to fetch GitHub profile")
-
-        gh_user = user_resp.json()
-        github_email = gh_user.get("email")
-        github_name = gh_user.get("name") or gh_user.get("login", "")
-        github_login = gh_user.get("login", "")
-
-        # If email is private on GitHub profile, fetch from user emails endpoint
-        if not github_email:
-            emails_resp = httpx.get(
-                "https://api.github.com/user/emails",
-                headers={
-                    "Authorization": f"Bearer {gh_access_token}",
-                    "Accept": "application/json",
-                    "User-Agent": "InvIQ-Auth",
-                },
-                timeout=10,
-            )
-            if emails_resp.status_code == 200:
-                for em in emails_resp.json():
-                    if em.get("primary") and em.get("verified"):
-                        github_email = em.get("email")
-                        break
-                    if not github_email and em.get("verified"):
-                        github_email = em.get("email")
-
-        if not github_email:
-            github_email = f"{github_login}@users.noreply.github.com"
-
-        # Step 3: Check if user exists
-        user = db.get_by_email(github_email)
-
-        if user:
-            # Existing user - log them in
-            if not user.is_active:
-                raise AuthenticationError("User account is disabled")
-
-            db.record_login(user)
-
-            access_token = create_access_token(
-                {
-                    "sub": str(user.id),
-                    "username": user.username,
-                    "role": user.role,
-                    "org_id": user.org_id,
-                }
-            )
-            refresh_token = create_refresh_token(
-                {"sub": str(user.id), "username": user.username}
-            )
-
-            audit = AuditService(db.db)
-            audit.log(
-                username=user.username,
-                action="GITHUB_LOGIN",
-                resource_type="user",
-                resource_id=str(user.id),
-                user_id=user.id,
-                ip_address=_get_client_ip(request),
-            )
-
-            return {
-                "success": True,
-                "message": "Login successful via GitHub",
-                "data": {
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                    "token_type": "bearer",
-                    "user": _user_dict(user),
-                },
-            }
-
-        # Step 4: New user - auto register
-        base_username = github_login or github_email.split("@")[0]
-        username = base_username
-        counter = 1
-        while db.get_by_username(username):
-            username = f"{base_username}{counter}"
-            counter += 1
-
-        user = db.create(
-            email=github_email,
-            username=username,
-            password=hash_password(secrets.token_urlsafe(32)),
-            full_name=github_name,
-            role="staff",
-        )
-
-        user.is_verified = True
-        user.is_active = True
-        db.update(user)
-
-        access_token = create_access_token(
-            {
-                "sub": str(user.id),
-                "username": user.username,
-                "role": user.role,
-                "org_id": user.org_id,
-            }
-        )
-        refresh_token = create_refresh_token(
-            {"sub": str(user.id), "username": user.username}
-        )
-
-        audit = AuditService(db.db)
-        audit.log(
-            username=user.username,
-            action="GITHUB_REGISTER",
-            resource_type="user",
-            resource_id=str(user.id),
-            user_id=user.id,
-            details={"email": github_email, "github_login": github_login},
-            ip_address=_get_client_ip(request),
-        )
-
-        return {
-            "success": True,
-            "message": "Account created successfully via GitHub",
-            "data": {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "token_type": "bearer",
-                "user": _user_dict(user),
-            },
-        }
-
-    except httpx.RequestError as e:
-        logger.error(f"GitHub OAuth error: {e}")
-        raise AuthenticationError("Failed to verify GitHub account")
