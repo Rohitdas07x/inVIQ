@@ -11,9 +11,9 @@ from fastapi import HTTPException
 from app.core.dependencies import (
     get_current_user,
     require_staff,
-    require_manager,
     require_admin,
 )
+
 from app.core.exceptions import AuthenticationError, AuthorizationError
 
 
@@ -58,7 +58,8 @@ class TestRoleRequirements:
         user = test_user["user"]
         user.role = "staff"
         # Staff role should be allowed
-        assert user.role in ["staff", "manager", "admin", "super_admin"]
+        assert user.role in ["staff", "admin", "super_admin"]
+
 
     def test_require_staff_with_viewer(self):
         """Viewer should fail staff requirement."""
@@ -69,23 +70,15 @@ class TestRoleRequirements:
         has_permission = check_role_permission(mock_user.role, "staff")
         assert has_permission is False
 
-    def test_require_manager_with_manager(self):
-        """Manager should pass manager requirement."""
-        mock_user = Mock()
-        mock_user.role = "manager"
-        
-        from app.core.security import check_role_permission
-        has_permission = check_role_permission(mock_user.role, "manager")
-        assert has_permission is True
-
-    def test_require_manager_with_staff(self):
-        """Staff should fail manager requirement."""
+    def test_require_admin_with_staff(self):
+        """Staff should fail admin requirement."""
         mock_user = Mock()
         mock_user.role = "staff"
         
         from app.core.security import check_role_permission
-        has_permission = check_role_permission(mock_user.role, "manager")
+        has_permission = check_role_permission(mock_user.role, "admin")
         assert has_permission is False
+
 
     def test_require_admin_with_admin(self, admin_user):
         """Admin should pass admin requirement."""

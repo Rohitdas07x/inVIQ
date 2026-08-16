@@ -26,12 +26,16 @@ from app.core.security import hash_password
 from app.infrastructure.database.models import User
 
 
-TEST_DATABASE_URL = "sqlite:///test_temp.db"
+from sqlalchemy.pool import StaticPool
+
+TEST_DATABASE_URL = "sqlite:///file:memdb_test?mode=memory&cache=shared&uri=true"
 test_engine = create_engine(
     TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "uri": True},
+    poolclass=StaticPool,
 )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
 
 
 def override_get_db():
@@ -47,24 +51,10 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    import os
-    # Clean up any leftover database file
-    if os.path.exists("test_temp.db"):
-        try:
-            os.remove("test_temp.db")
-        except Exception:
-            pass
-
     Base.metadata.create_all(bind=test_engine)
     yield
     Base.metadata.drop_all(bind=test_engine)
-    
-    # Final cleanup of the temporary database file
-    if os.path.exists("test_temp.db"):
-        try:
-            os.remove("test_temp.db")
-        except Exception:
-            pass
+
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -148,13 +138,24 @@ def admin_user(db):
     return {"username": "testadmin", "password": "adminpass123", "user": user}
 
 
-def get_auth_header(client, username: str, password: str) -> dict:
+def get_auth_header(client, email_or_username: str, password: str) -> dict:
+    if "@" in email_or_username:
+        email = email_or_username
+    elif email_or_username == "testadmin":
+        email = "admin@example.com"
+    elif email_or_username == "testuser":
+        email = "test@example.com"
+    else:
+        email = f"{email_or_username}@example.com"
+
     response = client.post(
         "/api/auth/login",
         json={
-            "username": username,
+            "email": email,
             "password": password,
         },
     )
     token = response.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+

@@ -23,13 +23,11 @@ class TestInventoryLocations:
         assert data["success"] is True
         assert "data" in data
 
-    def test_get_locations_public_access(self, client):
-        """GET /locations is a public endpoint (uses optional auth) — returns 200."""
+    def test_get_locations_unauthenticated(self, client):
+        """GET /locations requires authentication — returns 401 when no token is provided."""
         response = client.get("/api/inventory/locations")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert isinstance(data["data"], list)
+        assert response.status_code == 401
+
 
     def test_create_location_success(self, client, test_user):
         """POST /inventory/locations with valid payload creates a location."""

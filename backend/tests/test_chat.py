@@ -288,23 +288,82 @@ class TestChatSessions:
 # ── /api/chat/suggestions ─────────────────────────────────────────────────
 
 class TestChatSuggestions:
-    """GET /api/chat/suggestions — public endpoint."""
+    """GET /api/chat/suggestions — authenticated endpoint."""
 
-    def test_suggestions_accessible_without_auth(self, client):
+    def test_suggestions_unauthenticated_returns_401(self, client):
         r = client.get("/api/chat/suggestions")
+        assert r.status_code == 401
+
+    def test_suggestions_returns_categories(self, client, test_user):
+        headers = get_auth_header(client, test_user["email"], test_user["password"])
+        r = client.get("/api/chat/suggestions", headers=headers)
         assert r.status_code == 200
-
-    def test_suggestions_returns_categories(self, client):
-        r = client.get("/api/chat/suggestions")
         data = r.json()
         assert data["success"] is True
         suggestions = data["suggestions"]
         assert isinstance(suggestions, list)
         assert len(suggestions) > 0
 
-    def test_suggestions_have_required_keys(self, client):
-        r = client.get("/api/chat/suggestions")
+    def test_suggestions_have_required_keys(self, client, test_user):
+        headers = get_auth_header(client, test_user["email"], test_user["password"])
+        r = client.get("/api/chat/suggestions", headers=headers)
+        assert r.status_code == 200
         for group in r.json()["suggestions"]:
             assert "category" in group
             assert "questions" in group
             assert isinstance(group["questions"], list)
+
+
+
+# ── /api/chat/transcribe ──────────────────────────────────────────────────
+
+class TestVoiceTranscribe:
+    """POST /api/chat/transcribe — English-only voice transcription via Sarvam AI."""
+
+    def test_transcribe_unauthenticated_returns_401(self, client):
+        files = {"file": ("test.webm", b"fake audio bytes", "audio/webm")}
+        r = client.post("/api/chat/transcribe", files=files)
+        assert r.status_code == 401
+
+    def test_transcribe_missing_key_returns_422(self, client, test_user, monkeypatch):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "SARVAM_API_KEY", "")
+        headers = get_auth_header(client, test_user["email"], test_user["password"])
+        files = {"file": ("test.webm", b"fake audio bytes", "audio/webm")}
+        r = client.post("/api/chat/transcribe", files=files, headers=headers)
+        assert r.status_code == 422
+        assert "not configured" in r.json()["detail"].lower()
+
+    def test_transcribe_success_en_in(self, client, test_user, monkeypatch):
+        from app.core.config import settings
+        from unittest.mock import MagicMock
+        monkeypatch.setattr(settings, "SARVAM_API_KEY", "test-sarvam-key")
+
+        # Mock SarvamAI client
+        mock_response = MagicMock()
+        mock_response.transcript = "What medicines are running low in stock?"
+        mock_client = MagicMock()
+        mock_client.speech_to_text.transcribe.return_value = mock_response
+
+        import sys
+        mock_sarvam_mod = MagicMock()
+        mock_sarvam_mod.SarvamAI.return_value = mock_client
+        monkeypatch.setitem(sys.modules, "sarvamai", mock_sarvam_mod)
+
+        headers = get_auth_header(client, test_user["email"], test_user["password"])
+        files = {"file": ("query.webm", b"sample-audio-data", "audio/webm")}
+        r = client.post("/api/chat/transcribe", files=files, headers=headers)
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["success"] is True
+        assert data["text"] == "What medicines are running low in stock?"
+
+        # Verify language_code was explicitly 'en-IN'
+        mock_client.speech_to_text.transcribe.assert_called_once()
+        kwargs = mock_client.speech_to_text.transcribe.call_args.kwargs
+        assert kwargs["language_code"] == "en-IN"
+        assert kwargs["mode"] == "transcribe"
+        assert kwargs["model"] == "saaras:v3"
+
+

@@ -64,17 +64,19 @@ class TestAgentTools:
 
 
 class TestAgentToolRegistration:
-    """Verify all 9 tools are registered in the agent service."""
+    """Verify all 10 tools are registered in the agent service."""
 
     def test_all_tools_registered(self):
-        """INVENTORY_TOOLS should contain exactly 9 tools."""
-        assert len(INVENTORY_TOOLS) == 9
+        """INVENTORY_TOOLS should contain exactly 10 tools."""
+        assert len(INVENTORY_TOOLS) == 10
 
     def test_pharmacy_tools_in_registry(self):
         """Pharmacy-specific tools should be in the registry."""
         tool_names = [t.name for t in INVENTORY_TOOLS]
         assert "get_near_expiry_items" in tool_names
         assert "get_cold_chain_items" in tool_names
+        assert "search_medicines" in tool_names
+
 
     def test_core_tools_in_registry(self):
         """Core inventory tools should all still be present."""

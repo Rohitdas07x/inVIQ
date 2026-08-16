@@ -164,8 +164,8 @@ class TestRequisitionDetails:
 class TestRequisitionApproval:
     """Test requisition approval endpoint."""
 
-    def test_approve_requisition_requires_manager(self, client, test_user):
-        """Approve requisition should require manager role."""
+    def test_approve_requisition_requires_admin(self, client, test_user):
+        """Approve requisition should require admin role."""
         headers = get_auth_header(client, test_user["username"], test_user["password"])
         response = client.put(
             "/api/requisition/1/approve",
@@ -174,6 +174,7 @@ class TestRequisitionApproval:
         )
         # Staff user should not have permission
         assert response.status_code in [401, 403]
+
 
     def test_approve_requisition_success(self, client, admin_user, db):
         """Approve requisition should succeed for admin."""

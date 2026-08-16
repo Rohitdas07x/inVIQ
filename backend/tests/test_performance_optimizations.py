@@ -203,14 +203,15 @@ def test_inventory_lookup_redis_caching(client, admin_user):
         cache_invalidate_pattern("ref:*")
 
         # 1. First fetch -> should populate cache
-        res1 = client.get("/api/inventory/locations")
+        res1 = client.get("/api/inventory/locations", headers=headers)
         assert res1.status_code == 200
         assert cache_get("ref:locations") is not None
 
         # 2. Second fetch -> serves from cache
-        res2 = client.get("/api/inventory/locations")
+        res2 = client.get("/api/inventory/locations", headers=headers)
         assert res2.status_code == 200
         assert res1.json() == res2.json()
+
 
         # 3. Create new location -> should invalidate cache
         new_loc_payload = {

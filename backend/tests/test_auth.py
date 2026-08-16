@@ -57,13 +57,34 @@ class TestRegister:
         # Should fail — duplicate username
         assert response.status_code in [400, 409, 422]
 
+    def test_public_signup_success(self, client):
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+        uname = f"user_{unique_id}"
+        response = client.post(
+            "/api/auth/signup",
+            json={
+                "email": f"{uname}@example.com",
+                "username": uname,
+                "password": "Password123!",
+                "full_name": "New Public User",
+                "role": "staff",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["username"] == uname
+
+
+
 
 class TestLogin:
     """Login and authentication tests."""
 
     def test_login_success(self, client, test_user):
         response = client.post("/api/auth/login", json={
-            "username": test_user["username"],
+            "email": test_user["user"].email,
             "password": test_user["password"],
         })
         assert response.status_code == 200
@@ -74,17 +95,18 @@ class TestLogin:
 
     def test_login_wrong_password(self, client, test_user):
         response = client.post("/api/auth/login", json={
-            "username": test_user["username"],
+            "email": test_user["user"].email,
             "password": "wrongpassword",
         })
         assert response.status_code in [401, 403]
 
     def test_login_nonexistent_user(self, client):
         response = client.post("/api/auth/login", json={
-            "username": "ghostuser",
+            "email": "ghostuser@example.com",
             "password": "nopass",
         })
         assert response.status_code in [401, 403]
+
 
 
 class TestLogout:

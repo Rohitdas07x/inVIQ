@@ -173,17 +173,14 @@ class TestRoleHierarchy:
 
     def test_role_hierarchy_structure(self):
         """Role hierarchy should have correct levels."""
-        assert ROLE_HIERARCHY["super_admin"] == 6
-        assert ROLE_HIERARCHY["admin"] == 5
-        assert ROLE_HIERARCHY["manager"] == 4
-        assert ROLE_HIERARCHY["staff"] == 3
-        assert ROLE_HIERARCHY["vendor"] == 2
-        assert "viewer" not in ROLE_HIERARCHY  # removed — backend requires real role
+        assert ROLE_HIERARCHY["super_admin"] == 4
+        assert ROLE_HIERARCHY["admin"] == 3
+        assert ROLE_HIERARCHY["staff"] == 2
+        assert ROLE_HIERARCHY["vendor"] == 1
 
     def test_allowed_roles_set(self):
         """Allowed roles should match hierarchy keys."""
-        assert ALLOWED_ROLES == {"super_admin", "admin", "manager", "staff", "vendor"}
-        assert "viewer" not in ALLOWED_ROLES  # backend requires authenticated real role
+        assert ALLOWED_ROLES == {"super_admin", "admin", "staff", "vendor"}
 
     def test_check_role_permission_same_level(self):
         """User with same role level should have permission."""
@@ -193,14 +190,15 @@ class TestRoleHierarchy:
     def test_check_role_permission_higher_level(self):
         """User with higher role should have permission."""
         assert check_role_permission("admin", "staff") is True
-        assert check_role_permission("manager", "vendor") is True
+        assert check_role_permission("admin", "vendor") is True
         assert check_role_permission("super_admin", "admin") is True
 
     def test_check_role_permission_lower_level(self):
         """User with lower role should not have permission."""
         assert check_role_permission("staff", "admin") is False
-        assert check_role_permission("vendor", "manager") is False
+        assert check_role_permission("vendor", "admin") is False
         assert check_role_permission("vendor", "staff") is False
+
 
     def test_check_role_permission_invalid_user_role(self):
         """Invalid user role should deny permission."""
