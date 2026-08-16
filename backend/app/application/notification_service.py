@@ -60,12 +60,13 @@ class NotificationService:
 
             # Role-specific portal URLs
             role_portals = {
+                "super_admin": "/superadmin/dashboard",
                 "admin": "/admin/dashboard",
-                "manager": "/manager/dashboard",
                 "staff": "/staff",
                 "vendor": "/vendor",
             }
             portal_url = role_portals.get(role, "/signin")
+
 
             # HTML email template
             html_content = f"""
@@ -392,7 +393,8 @@ class NotificationService:
 
         try:
             display_name = full_name or username
-            subject = "🎉 Congratulations on Joining InvIQ as Administrator!"
+            sender_contact = "bwubts23263@brainwareuniversity.ac.in"
+            subject = f"🎉 Welcome to InvIQ Admin Control — Message from {sender_contact}"
             org_line = f" for <strong>{organization_name}</strong>" if organization_name else ""
             dashboard_url = f"{settings.FRONTEND_URL or 'http://localhost:5173'}/admin/dashboard"
 
@@ -410,12 +412,16 @@ class NotificationService:
                     .badge {{ display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }}
                     .content {{ padding: 32px 30px; }}
                     .greeting {{ font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }}
+                    .personal-card {{ background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin-bottom: 24px; }}
+                    .personal-title {{ font-weight: 700; color: #166534; font-size: 14px; margin-bottom: 6px; }}
+                    .personal-text {{ font-size: 13px; color: #15803d; margin: 0; line-height: 1.5; }}
                     .feature-grid {{ margin: 24px 0; display: grid; gap: 12px; }}
                     .feature-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; }}
                     .feature-title {{ font-weight: 700; color: #4338ca; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; }}
                     .feature-desc {{ font-size: 13px; color: #64748b; margin: 0; }}
                     .action-box {{ text-align: center; margin: 32px 0 24px; }}
                     .btn-primary {{ display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35); }}
+                    .signature-box {{ border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 24px; }}
                     .footer {{ background: #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }}
                 </style>
             </head>
@@ -428,8 +434,18 @@ class NotificationService:
                     </div>
                     <div class="content">
                         <div class="greeting">Hello {display_name},</div>
+                        
+                        <div class="personal-card">
+                            <div class="personal-title">✉️ Direct Welcome Note from Founder & Lead Engineering:</div>
+                            <p class="personal-text">
+                                "Welcome to the InvIQ ecosystem! As an administrator, you are equipped with state-of-the-art AI tooling, automated delivery reconciliation, and zero-latency inventory tracking designed specifically for healthcare excellence."
+                                <br><br>
+                                — <strong>Sayandip Bar</strong> (<a href="mailto:{sender_contact}" style="color: #166534; font-weight: 600;">{sender_contact}</a>)
+                            </p>
+                        </div>
+
                         <p>
-                            Congratulations on signing up as an <strong>Administrator</strong>{org_line} on <strong>InvIQ</strong> — the intelligent healthcare supply chain and inventory management platform.
+                            Congratulations on signing up as an <strong>Administrator</strong>{org_line} on <strong>InvIQ</strong>.
                         </p>
                         <p>
                             With your Admin privileges, you have complete oversight and command of your operations:
@@ -455,12 +471,19 @@ class NotificationService:
                         <div class="action-box">
                             <a href="{dashboard_url}" class="btn-primary">Launch Admin Dashboard →</a>
                         </div>
-                        <p style="font-size: 13px; color: #64748b; text-align: center; margin-top: 20px;">
-                            Username: <strong>{username}</strong> | Registered Email: <strong>{to_email}</strong>
-                        </p>
+                        
+                        <div class="signature-box">
+                            <p style="font-size: 13px; color: #475569; margin: 0;">
+                                For onboarding support, integration assistance, or custom features, reach out directly at:<br>
+                                <strong>📧 {sender_contact}</strong>
+                            </p>
+                            <p style="font-size: 13px; color: #64748b; margin-top: 8px;">
+                                Username: <strong>{username}</strong> | Registered Email: <strong>{to_email}</strong>
+                            </p>
+                        </div>
                     </div>
                     <div class="footer">
-                        <p>This automated message was sent to confirm your administrator onboarding.</p>
+                        <p>This message was sent from InvIQ Platform Engineering to confirm your administrator onboarding.</p>
                         <p>&copy; 2026 InvIQ — Intelligent Healthcare Inventory Management System</p>
                     </div>
                 </div>
@@ -469,8 +492,10 @@ class NotificationService:
             """
 
             msg = MIMEMultipart("alternative")
-            msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL or settings.SMTP_USER}>"
+            from_header = f"Sayandip Bar <{sender_contact}>"
+            msg["From"] = from_header
             msg["To"] = to_email
+            msg["Reply-To"] = sender_contact
             msg["Subject"] = subject
             msg.attach(MIMEText(html_content, "html"))
 
@@ -478,13 +503,14 @@ class NotificationService:
                 server.starttls()
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.sendmail(
-                    settings.SMTP_FROM_EMAIL or settings.SMTP_USER,
+                    sender_contact,
                     to_email,
                     msg.as_string(),
                 )
 
             logger.info(
-                "Admin congratulations email sent successfully to %s (username: %s)",
+                "Admin congratulations email sent successfully from %s to %s (username: %s)",
+                sender_contact,
                 mask_email(to_email),
                 username,
             )

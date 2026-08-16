@@ -6,8 +6,9 @@ the rest of the application's error handling pattern.
 """
 
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.infrastructure.database.queries import (
+
     get_latest_stock_health,
     get_critical_alerts,
     get_heatmap_data,
@@ -115,9 +116,20 @@ class AnalyticsService:
             raise AppException(f"Failed to generate summary: {str(e)}")
 
     @staticmethod
-    def get_dashboard_stats(db: Session) -> Dict[str, Any]:
+    def get_dashboard_stats(
+        db: Session,
+        org_id: Optional[int] = None,
+        location_id: Optional[int] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         try:
-            stock_health = get_latest_stock_health(db)
+            stock_health = get_latest_stock_health(
+                db,
+                org_id=org_id,
+                location_id=location_id,
+                category=category,
+            )
+
 
             category_counts = {}
             for item in stock_health:

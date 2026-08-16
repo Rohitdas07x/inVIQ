@@ -45,10 +45,11 @@ class InventoryService:
                     u.email
                     for u in self.repo.db.query(User)
                     .filter(
-                        User.role.in_(["admin", "super_admin", "manager"]),
+                        User.role.in_(["admin", "super_admin"]),
                         User.is_active.is_(True),
                         User.email.isnot(None),
                     )
+
                     .all()
                 ]
                 InventoryService._recipients_cache = recipients
@@ -274,6 +275,103 @@ class InventoryService:
 
         return result
 
+    def dispense_by_barcode(
+
+        self,
+        barcode_or_id: str,
+        location_id: int,
+        quantity: int = 1,
+        entered_by: str = "staff",
+        org_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        High-speed barcode dispense for retail pharmacy counters.
+        Finds medicine by barcode (or ID), picks the earliest-expiring active batch (FEFO order),
+        atomically reduces stock, records transaction, triggers alerts, and flushes cache.
+        """
+        if quantity <= 0:
+            raise ValidationError("Dispense quantity must be greater than 0")
+
+        # 1. Resolve Item by barcode or integer ID
+        item = None
+        barcode_clean = str(barcode_or_id).strip()
+        if barcode_clean:
+            item = self.repo.get_item_by_barcode(barcode_clean, org_id=org_id)
+
+        if not item and barcode_clean.isdigit():
+            item = self.repo.get_item_by_id(int(barcode_clean))
+            if item and org_id is not None and item.org_id not in (None, org_id):
+                item = None
+
+        if not item:
+            raise ValidationError(f"Medicine not found for barcode/ID: '{barcode_or_id}'")
+
+        # 2. Check current stock level at this pharmacy location
+        current_stock = self.get_latest_stock(location_id, item.id) or 0
+        if current_stock < quantity:
+            raise InsufficientStockError(
+                f"Insufficient stock for {item.name}: only {current_stock} {item.unit} available at this counter (requested {quantity})"
+            )
+
+        # 3. Find earliest-expiring batch (FEFO Order)
+        from app.infrastructure.database.models import InventoryTransaction
+        fefo_tx = (
+            self.repo.db.query(InventoryTransaction)
+            .filter(
+                InventoryTransaction.location_id == location_id,
+                InventoryTransaction.item_id == item.id,
+                InventoryTransaction.batch_number.isnot(None),
+            )
+            .order_by(InventoryTransaction.expiry_date.asc().nullslast(), InventoryTransaction.id.desc())
+            .first()
+        )
+
+        batch_number = fefo_tx.batch_number if fefo_tx else f"BT-SCAN-{int(time.time()) % 10000}"
+        expiry_date = fefo_tx.expiry_date if fefo_tx else date.today()
+
+        # 4. Perform atomic stock issue
+        tx_result = self.add_transaction(
+            location_id=location_id,
+            item_id=item.id,
+            transaction_date=date.today(),
+            received=0,
+            issued=quantity,
+            notes=f"Quick Barcode Dispense [Code: {item.barcode or barcode_or_id}]",
+            entered_by=entered_by,
+            batch_number=batch_number,
+            expiry_date=expiry_date,
+        )
+
+        # 5. Targeted cache invalidation for real-time reactivity
+        try:
+            from app.application.cache_service import cache_invalidate_pattern
+            cache_invalidate_pattern(f"ref:location_items:{location_id}")
+            cache_invalidate_pattern(f"analytics:alerts:*")
+        except Exception as e:
+            logger.debug("Cache invalidation skipped: %s", e)
+
+
+        remaining_stock = tx_result["data"]["closing_stock"]
+        status = "CRITICAL" if remaining_stock <= 0 else ("WARNING" if remaining_stock <= item.min_stock else "HEALTHY")
+
+        return {
+            "success": True,
+            "message": f"Dispensed {quantity} {item.unit} of {item.name}",
+            "data": {
+                "item_id": item.id,
+                "item_name": item.name,
+                "category": item.category,
+                "barcode": item.barcode,
+                "mrp": getattr(item, "mrp", 0.0),
+                "batch_number": batch_number,
+                "expiry_date": str(expiry_date) if expiry_date else None,
+                "dispensed_quantity": quantity,
+                "remaining_stock": remaining_stock,
+                "status": status,
+                "transaction_id": tx_result["data"]["id"],
+            },
+        }
+
     @staticmethod
     def add_transaction_static(db, **kwargs) -> Dict[str, Any]:
         from app.infrastructure.database.inventory_repo import InventoryRepository
@@ -289,3 +387,4 @@ class InventoryService:
         repo = InventoryRepository(db)
         svc = InventoryService(repo)
         return svc.get_latest_stock(location_id, item_id)
+

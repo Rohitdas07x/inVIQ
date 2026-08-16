@@ -27,11 +27,12 @@ from app.application.agent_tools import (
     get_consumption_trends,
     get_near_expiry_items,
     get_cold_chain_items,
+    search_medicines,
 )
 
 logger = logging.getLogger("smart_inventory.agent")
 
-# ── All 9 inventory tools (7 core + 2 pharmacy-specific) ──────────────────────
+# ── All 10 inventory tools (7 core + 3 pharmacy-specific) ─────────────────────
 INVENTORY_TOOLS = [
     get_inventory_overview,
     get_critical_items,
@@ -42,11 +43,15 @@ INVENTORY_TOOLS = [
     get_consumption_trends,
     get_near_expiry_items,
     get_cold_chain_items,
+    search_medicines,
 ]
+
 
 # ── Lazy-initialized agent singleton ───────────────────────────────────────
 _agent = None
 _agent_available = False
+_agent_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
 
 
 def _build_agent():
@@ -138,33 +143,44 @@ def invoke_agent(
     messages = [{"role": "system", "content": system_prompt}]
 
     if conversation_history:
-        # Include last 6 messages for continuity (avoid token overflow)
-        for msg in conversation_history[-6:]:
-            messages.append({
-                "role": msg["role"],
-                "content": msg["content"],
-            })
+        # Include last 4 messages to keep token usage well within Groq TPM limits
+        for msg in conversation_history[-4:]:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content and role in {"user", "assistant"}:
+                messages.append({"role": role, "content": str(content)[:1000]})
 
     messages.append({"role": "user", "content": question})
 
-    try:
-        # Cross-platform 30-second timeout using a thread pool future.
-        # signal.SIGALRM is not available on Windows and is therefore useless here.
-        #
-        # CRITICAL: contextvars (including the DB session ContextVar set by
-        # set_db_session() in chat.py) are NOT automatically inherited by worker
-        # threads in Python <3.12.  We must capture the current context snapshot
-        # with copy_context() and then run the agent inside that snapshot using
-        # ctx.run(), otherwise _get_db() returns None inside every @tool function.
-        ctx = contextvars.copy_context()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(ctx.run, _agent.invoke, {"messages": messages})
+    def _invoke_with_retry():
+        import time
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
             try:
-                result = future.result(timeout=30)
-            except concurrent.futures.TimeoutError:
-                logger.error("Agent invocation timed out after 30s")
-                raise RuntimeError("Agent request timed out — please try again")
+                return _agent.invoke({"messages": messages})
+            except Exception as exc:
+                err_str = str(exc).lower()
+                is_rate_limit = "429" in err_str or "rate_limit" in err_str or "tpm" in err_str or "too many requests" in err_str
+                if is_rate_limit and attempt < max_retries:
+                    wait_s = 2 ** (attempt - 1)  # 1s, 2s, 4s backoff
+                    logger.warning(
+                        "Groq rate limit (429) on attempt %d/%d — retrying in %ds...",
+                        attempt,
+                        max_retries,
+                        wait_s,
+                    )
+                    time.sleep(wait_s)
+                else:
+                    raise exc
+
+    try:
+        ctx = contextvars.copy_context()
+        future = _agent_executor.submit(ctx.run, _invoke_with_retry)
+        try:
+            result = future.result(timeout=20)
+        except concurrent.futures.TimeoutError:
+            logger.error("Agent invocation timed out after 20s")
+            raise RuntimeError("Agent request timed out — please try again")
 
         # Extract the final assistant message from the agent response.
         agent_messages = result.get("messages", [])
@@ -176,12 +192,12 @@ def invoke_agent(
                 continue
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
-                return content
+                return str(content)
 
         # Fallback: return the last message content if it has any.
         if agent_messages:
             last_content = getattr(agent_messages[-1], "content", None)
-            return last_content or "I couldn't generate a response. Please try rephrasing."
+            return str(last_content) or "I couldn't generate a response. Please try rephrasing."
 
         return "I couldn't generate a response. Please try rephrasing your question."
 
@@ -200,3 +216,4 @@ def invoke_agent(
             raise RuntimeError("Groq API key is invalid or expired — please update GROQ_API_KEY")
         logger.error("Agent invocation failed: %s", e, exc_info=True)
         raise RuntimeError(f"Agent error: {str(e)}")
+

@@ -62,26 +62,46 @@ def get_requisition_service(
 # ── Authentication dependency (FastAPI tutorial pattern) ───────────────────
 
 
+import time
+import threading
+
+_user_auth_cache = {}
+_user_auth_cache_lock = threading.Lock()
+
+
 def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     db: Session = Depends(get_db),
 ) -> User:
     """
     Decode and validate the Bearer JWT token on every protected request.
-
-    Follows the FastAPI OAuth2 + JWT tutorial exactly:
-      1. OAuth2PasswordBearer extracts Bearer token from Authorization header
-      2. PyJWT decodes and verifies signature + expiry
-      3. Token blacklist check (logout support)
-      4. User lookup from DB to ensure account still active
-
-    Raises HTTP 401 on any failure with WWW-Authenticate: Bearer header.
+    Uses fast L1 memory cache (30s) to avoid redundant DB and Redis round-trips.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # 1. Fast L1 auth cache check (<0.05ms) — cache validated user_id to skip JWT + Redis decode
+    now = time.time()
+    cached_user_id = None
+    with _user_auth_cache_lock:
+        cached = _user_auth_cache.get(token)
+        if cached is not None:
+            exp_ts, uid = cached
+            if now < exp_ts:
+                cached_user_id = uid
+            else:
+                _user_auth_cache.pop(token, None)
+
+    if cached_user_id is not None:
+        user_repo = UserRepository(db)
+        user = user_repo.get_by_id(cached_user_id)
+        if user and user.is_active:
+            return user
+        with _user_auth_cache_lock:
+            _user_auth_cache.pop(token, None)
 
     try:
         # ── Check token blacklist (invalidated on logout) ──────────────
@@ -112,7 +132,13 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        # Populate L1 cache with validated user_id (30s TTL)
+        with _user_auth_cache_lock:
+            if len(_user_auth_cache) < 5000:
+                _user_auth_cache[token] = (now + 30.0, user.id)
+
         return user
+
 
     except HTTPException:
         raise
@@ -123,55 +149,8 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     except Exception:
+
         raise credentials_exception
-
-
-async def get_optional_user(
-    request: Request,
-    db: Session = Depends(get_db),
-) -> Optional[User]:
-    """
-    Optional authentication dependency for Guest Demo Mode endpoints.
-
-    Reads the Authorization header and attempts JWT validation.
-    Returns the authenticated User object if the token is valid, or
-    None (silently) when:
-      - No Authorization header / token is present
-      - Token is expired, malformed, or on the blacklist
-      - The referenced user no longer exists or is inactive
-
-    Unlike get_current_user(), this dependency NEVER raises HTTP 401.
-    Use it on GET endpoints that should be readable by unauthenticated
-    guests while still identifying authenticated callers if present.
-    """
-    from app.infrastructure.cache.token_blacklist import is_token_blacklisted
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None
-
-    token = auth_header[7:]
-    if not token:
-        return None
-
-    try:
-        if is_token_blacklisted(token):
-            return None
-
-        payload = verify_access_token(token)
-        user_id = payload.get("sub")
-        if not user_id:
-            return None
-
-        user_repo = UserRepository(db)
-        user = user_repo.get_by_id(user_id)
-        if user is None or not user.is_active:
-            return None
-
-        return user
-    except Exception:
-        # Any JWT or DB failure → silently treat caller as guest
-        return None
 
 
 # ── Active user shorthand ──────────────────────────────────────────────────
@@ -190,10 +169,10 @@ def get_current_active_user(
 
 
 def require_role(required_role: str):
-    """Factory that returns a dependency requiring minimum role level."""
+    """Factory for role-based route protection."""
 
     def role_checker(
-        current_user: Annotated[User, Depends(get_current_user)],
+        current_user: Annotated[User, Depends(get_current_active_user)],
     ) -> User:
         if not check_role_permission(current_user.role, required_role):
             raise HTTPException(
@@ -207,12 +186,6 @@ def require_role(required_role: str):
 
 def require_admin(
     current_user: Annotated[User, Depends(require_role("admin"))],
-) -> User:
-    return current_user
-
-
-def require_manager(
-    current_user: Annotated[User, Depends(require_role("manager"))],
 ) -> User:
     return current_user
 
@@ -238,10 +211,11 @@ def require_super_admin(
 def require_vendor(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    """Vendor or higher role."""
-    if current_user.role not in {"vendor", "staff", "manager", "admin", "super_admin"}:
+    """Vendor or higher role (vendor → staff → admin → super_admin)."""
+    if not check_role_permission(current_user.role, "vendor"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Vendor access required.",
         )
     return current_user
+

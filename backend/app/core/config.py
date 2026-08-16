@@ -153,10 +153,8 @@ class Settings(BaseSettings):
     # and the public config endpoint that delivers the Client ID to the frontend.
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    # GitHub OAuth credentials
-    GITHUB_CLIENT_ID: str = ""
-    GITHUB_CLIENT_SECRET: str = ""
     SARVAM_API_KEY: str = ""
+
 
     # ── Azure Blob Storage (General PDF & Document Storage) ────────────
     AZURE_STORAGE_CONNECTION_STRING: Optional[str] = None

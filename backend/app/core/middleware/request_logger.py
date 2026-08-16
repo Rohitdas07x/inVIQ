@@ -31,11 +31,10 @@ _SILENT_PATHS = frozenset({"/health", "/favicon.ico", "/docs", "/openapi.json", 
 
 class RequestLoggerMiddleware:
     """
-    Pure ASGI middleware for structured HTTP request logging.
+    Pure ASGI middleware for structured HTTP request timing and logging.
 
     Bypasses WebSocket connections entirely so the WS handshake is never
-    interrupted — fixing the silent connection-drop bug caused by the old
-    BaseHTTPMiddleware approach.
+    interrupted.
     """
 
     def __init__(self, app) -> None:
@@ -52,15 +51,16 @@ class RequestLoggerMiddleware:
         path = scope.get("path", "")
         method = scope.get("method", "")
 
-        # Wrap the send callable to capture the response status code.
+        # Wrap the send callable to capture response status code and inject headers.
         status_code: list[int] = [0]
 
         async def send_wrapper(message) -> None:
             if message["type"] == "http.response.start":
                 status_code[0] = message["status"]
-                # Inject correlation headers
+                duration_ms = (time.perf_counter() - start_time) * 1000
                 headers = dict(message.get("headers", []))
                 headers[b"x-request-id"] = request_id.encode()
+                headers[b"x-process-time-ms"] = f"{duration_ms:.2f}".encode()
                 message = {**message, "headers": list(headers.items())}
             await send(message)
 
@@ -81,3 +81,4 @@ class RequestLoggerMiddleware:
             duration_ms,
             request_id,
         )
+

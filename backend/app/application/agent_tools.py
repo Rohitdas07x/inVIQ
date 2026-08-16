@@ -184,9 +184,93 @@ def get_critical_items(
         return [{"error": str(e)}]
 
 
+# ── Medicine Brand & Generic Salt Synonym Mapping ─────────────────────────────
+_GENERIC_TO_BRANDS = {
+    "paracetamol": ["dolo", "combiflam", "calpol", "crocin", "paracetamol"],
+    "acetaminophen": ["dolo", "combiflam", "calpol", "crocin"],
+    "ibuprofen": ["combiflam", "brufen"],
+    "pantoprazole": ["pan-d", "pantocid"],
+    "domperidone": ["pan-d"],
+    "amoxicillin": ["augmentin"],
+    "clavulanate": ["augmentin"],
+    "azithromycin": ["azithral"],
+    "ciprofloxacin": ["ciplox"],
+    "telmisartan": ["telma"],
+    "metformin": ["glycomet"],
+    "glimepiride": ["glycomet"],
+    "aspirin": ["ecosprin"],
+    "thyroxine": ["thyronorm"],
+    "montelukast": ["montair"],
+    "levocetirizine": ["montair"],
+    "fexofenadine": ["allegra"],
+    "salbutamol": ["ascoril"],
+    "ambroxol": ["ascoril"],
+    "xylometazoline": ["otrivin"],
+    "calcium": ["shelcal"],
+    "vitamin d": ["shelcal"],
+    "vitamin b": ["becosules"],
+    "b-complex": ["becosules"],
+    "ors": ["electral"],
+    "povidone": ["betadine"],
+    "iodine": ["betadine"],
+    "insulin": ["insulin lantus"],
+    "vaccine": ["covaxin"],
+}
+
+_CATEGORY_SYNONYMS = {
+    "fever": "analgesics",
+    "pain": "analgesics",
+    "painkiller": "analgesics",
+    "painkillers": "analgesics",
+    "antibiotic": "antibiotics",
+    "antibiotics": "antibiotics",
+    "stomach": "gastro",
+    "acidity": "gastro",
+    "heart": "cardiac",
+    "blood pressure": "cardiac",
+    "bp": "cardiac",
+    "sugar": "diabetes",
+    "cold": "respiratory",
+    "cough": "respiratory",
+    "allergy": "anti-allergic",
+    "refrigerated": "cold chain",
+}
+
+
+def _match_medicine(item_name: str, category: str, query: str) -> bool:
+    """Intelligently match medicine by exact name, partial token, generic salt alias, or category."""
+    if not query or not query.strip():
+        return True
+    q = query.lower().strip()
+    name = (item_name or "").lower()
+    cat = (category or "").lower()
+
+    # 1. Direct substring
+    if q in name or q in cat:
+        return True
+
+    # 2. Token-wise check
+    tokens = [t for t in q.replace("-", " ").split() if len(t) > 1]
+    if tokens and all(t in name or t in cat for t in tokens):
+        return True
+
+    # 3. Generic salt alias check
+    for generic, brands in _GENERIC_TO_BRANDS.items():
+        if generic in q or q in generic:
+            if any(b in name for b in brands):
+                return True
+
+    # 4. Category synonym check
+    for syn, mapped_cat in _CATEGORY_SYNONYMS.items():
+        if syn in q and mapped_cat in cat:
+            return True
+
+    return False
+
+
 @tool
 def get_stock_health(item: str = "", location: str = "") -> List[Dict[str, Any]]:
-    """Get current stock health across all locations and items, with optional filters."""
+    """Get current stock health across all locations and items, with intelligent medicine/location filters."""
     db = _get_db()
     if not db:
         return [{"error": "Database not connected"}]
@@ -196,12 +280,12 @@ def get_stock_health(item: str = "", location: str = "") -> List[Dict[str, Any]]
 
         if item and item.strip():
             stock_health = [
-                s for s in stock_health if item.lower() in s.item_name.lower()
+                s for s in stock_health if _match_medicine(s.item_name, s.category, item)
             ]
 
         if location and location.strip():
             stock_health = [
-                s for s in stock_health if location.lower() in s.location_name.lower()
+                s for s in stock_health if location.lower().strip() in s.location_name.lower()
             ]
 
         if not stock_health:
@@ -209,25 +293,34 @@ def get_stock_health(item: str = "", location: str = "") -> List[Dict[str, Any]]
 
         results = []
         for item_data in stock_health[:30]:
+            try:
+                days_rem = float(item_data.days_remaining) if item_data.days_remaining != 999 else "Plenty"
+                if isinstance(days_rem, float):
+                    days_rem = round(days_rem, 1)
+            except (ValueError, TypeError):
+                days_rem = "Plenty"
+
+            try:
+                daily_use = float(item_data.avg_daily_usage or 0.0)
+            except (ValueError, TypeError):
+                daily_use = 0.0
+
             results.append(
                 {
                     "location": item_data.location_name,
                     "item": item_data.item_name,
                     "category": item_data.category,
-                    "current_stock": item_data.current_stock,
-                    "days_remaining": round(item_data.days_remaining, 1)
-                    if item_data.days_remaining != 999
-                    else "Plenty",
-                    "status": item_data.health_status,
-                    "daily_usage": round(item_data.avg_daily_usage, 1)
-                    if item_data.avg_daily_usage
-                    else 0,
+                    "current_stock": int(item_data.current_stock or 0),
+                    "days_remaining": days_rem,
+                    "status": str(item_data.health_status),
+                    "daily_usage": round(daily_use, 1),
                 }
             )
 
         return results
     except Exception as e:
         return [{"error": str(e)}]
+
 
 
 @tool
@@ -254,26 +347,35 @@ def calculate_reorder_suggestions(location: str = "") -> List[Dict[str, Any]]:
 
         suggestions = []
         for item in critical[:15]:
+            avg_usage = float(item.avg_daily_usage or 0.0)
+            lead_days = int(item.lead_time_days or 2)
+            cur_stock = int(item.current_stock or 0)
             reorder_qty = calculate_reorder_quantity(
-                avg_daily_usage=item.avg_daily_usage or 0,
-                lead_time_days=item.lead_time_days,
-                current_stock=item.current_stock,
+                avg_daily_usage=avg_usage,
+                lead_time_days=lead_days,
+                current_stock=cur_stock,
             )
+
+            try:
+                days_rem = float(item.days_remaining) if item.days_remaining is not None and item.days_remaining != "N/A" else 999.0
+            except (ValueError, TypeError):
+                days_rem = 999.0
 
             suggestions.append(
                 {
                     "location": item.location_name,
                     "item": item.item_name,
-                    "current_stock": item.current_stock,
+                    "current_stock": cur_stock,
                     "recommended_quantity": reorder_qty,
-                    "urgency": "HIGH" if item.days_remaining < 1 else "MEDIUM",
-                    "reasoning": f"Daily usage: {round(item.avg_daily_usage, 1)} units, Lead time: {item.lead_time_days} days",
+                    "urgency": "HIGH" if days_rem < 1.0 else ("MEDIUM" if days_rem < 3.0 else "LOW"),
+                    "reasoning": f"Daily usage: {round(avg_usage, 1)} units, Lead time: {lead_days} days",
                 }
             )
 
         return suggestions
     except Exception as e:
-        return [{"error": str(e)}]
+        return [{"error": f"Failed to calculate reorder suggestions: {str(e)}"}]
+
 
 
 @tool
@@ -295,8 +397,6 @@ def get_location_summary(location_name: str) -> Dict[str, Any]:
 
         critical = sum(1 for s in location_data if s.health_status == "CRITICAL")
         warning = sum(1 for s in location_data if s.health_status == "WARNING")
-        healthy = sum(1 for s in location_data if s.health_status == "HEALTHY")
-
         return {
             "location": location_data[0].location_name,
             "total_items": len(location_data),
@@ -310,8 +410,9 @@ def get_location_summary(location_name: str) -> Dict[str, Any]:
 
 
 @tool
+
 def get_category_analysis(category: str) -> List[Dict[str, Any]]:
-    """Analyze stock health for items in a specific category."""
+    """Analyze stock health for items in a specific category (e.g. Antibiotics, Gastro, Analgesics, Cardiac)."""
     db = _get_db()
     if not db:
         return [{"error": "Database not connected"}]
@@ -320,7 +421,7 @@ def get_category_analysis(category: str) -> List[Dict[str, Any]]:
         stock_health = get_latest_stock_health(db)
 
         category_data = [
-            s for s in stock_health if category.lower() in s.category.lower()
+            s for s in stock_health if _match_medicine(s.item_name, s.category, category)
         ]
 
         if not category_data:
@@ -328,15 +429,20 @@ def get_category_analysis(category: str) -> List[Dict[str, Any]]:
 
         results = []
         for item in category_data[:20]:
+            try:
+                days_rem = float(item.days_remaining) if item.days_remaining != 999 else "Plenty"
+                if isinstance(days_rem, float):
+                    days_rem = round(days_rem, 1)
+            except (ValueError, TypeError):
+                days_rem = "Plenty"
+
             results.append(
                 {
                     "item": item.item_name,
                     "location": item.location_name,
-                    "status": item.health_status,
-                    "current_stock": item.current_stock,
-                    "days_remaining": round(item.days_remaining, 1)
-                    if item.days_remaining != 999
-                    else "Plenty",
+                    "status": str(item.health_status),
+                    "current_stock": int(item.current_stock or 0),
+                    "days_remaining": days_rem,
                 }
             )
 
@@ -363,6 +469,16 @@ def get_consumption_trends(
 
         start_date = latest_date - timedelta(days=days - 1)
 
+        # Resolve matching items using synonym expansion
+        matching_item_ids = None
+        if item and item.strip():
+            all_items = db.query(Item).all()
+            matching_item_ids = [
+                it.id for it in all_items if _match_medicine(it.name, it.category, item)
+            ]
+            if not matching_item_ids:
+                return {"info": f"No medicines found matching '{item}'."}
+
         query = (
             db.query(
                 InventoryTransaction.date.label("date"),
@@ -373,8 +489,8 @@ def get_consumption_trends(
             .filter(InventoryTransaction.date >= start_date)
         )
 
-        if item and item.strip():
-            query = query.filter(Item.name.ilike(f"%{item.strip()}%"))
+        if matching_item_ids is not None:
+            query = query.filter(InventoryTransaction.item_id.in_(matching_item_ids))
 
         if location and location.strip():
             query = query.filter(Location.name.ilike(f"%{location.strip()}%"))
@@ -503,3 +619,58 @@ def get_cold_chain_items(location: str = "") -> List[Dict[str, Any]]:
         return results
     except Exception as e:
         return [{"error": str(e)}]
+
+
+@tool
+def search_medicines(query: str = "", category: str = "", storage_temp: str = "") -> List[Dict[str, Any]]:
+    """
+    Search medicines in the pharmacy catalog by brand name, generic salt, barcode, or category.
+    Returns item name, category, strength, unit, MRP, purchase rate, barcode, and storage temperature.
+    """
+    db = _get_db()
+    if not db:
+        return [{"error": "Database not connected"}]
+
+    try:
+        q = db.query(Item)
+        if storage_temp and storage_temp.strip():
+            q = q.filter(Item.storage_temp == storage_temp.strip().lower())
+
+        all_items = q.order_by(Item.name.asc()).all()
+        matching_items = []
+
+        for it in all_items:
+            # Check category filter if provided
+            if category and category.strip():
+                if not _match_medicine(it.name, it.category, category):
+                    continue
+
+            # Check query filter if provided
+            if query and query.strip():
+                if not _match_medicine(it.name, it.category, query):
+                    continue
+
+            matching_items.append(it)
+
+        if not matching_items:
+            return [{"info": f"No medicines found matching '{query}'"}]
+
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "category": item.category,
+                "strength": item.strength or "N/A",
+                "unit": item.unit,
+                "barcode": item.barcode or "N/A",
+                "mrp": getattr(item, "mrp", 0.0),
+                "purchase_rate": getattr(item, "purchase_rate", 0.0),
+                "storage_temp": item.storage_temp,
+                "min_stock": item.min_stock,
+            }
+            for item in matching_items[:30]
+        ]
+    except Exception as e:
+        return [{"error": str(e)}]
+
+
