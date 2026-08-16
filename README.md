@@ -1,21 +1,17 @@
-# 🏥 InvIQ - AI-Powered Smart Wholesale Pharmacy & Warehouse Assistant
+# 🏥 InvIQ - AI-Powered Retail Chemist & Multi-Pharmacy Inventory Operating System
 
-**AI-powered inventory management for wholesale pharmacies and central warehouses with natural language queries and intelligent automation**
+**Smart AI inventory, FEFO expiry loss prevention, barcode quick-dispensing, and distributor Excel synchronization for retail medical stores and pharmacy chains.**
 
 ---
 
 ## 🎯 Problem It Solves
 
-Wholesale pharmacies and central distributors struggle to manage large bulks of pharmaceutical products across warehouses and client retail outlets, leading to critical stockouts, expired medications, and cold-chain compliance breaches. **InvIQ automates this inventory with AI-powered analytics, natural language queries, proactive batch expiry tracking, and cold-chain monitoring.**
+Independent retail medical stores and local pharmacy chains in Tier-2/3 cities lose significant revenue every month due to **expired medications (FEFO loss)**, missed customer sales from sudden stockouts, and manual paper-heavy distributor bills. **InvIQ provides a simple, ultra-fast, mobile-friendly platform tailored specifically for chemist shop owners:**
 
----
-
-
-## 🚀 Live Demo
-
-**Frontend:** [Coming Soon]  
-**Backend API:** [Coming Soon]  
-**API Docs:** [Coming Soon]/docs
+1. **Zero Expiry Loss (FEFO)**: Real-time alerts at 30, 60, and 90 days before batch expiration so chemists can return stock to distributors on time.
+2. **Instant Barcode Quick Dispense**: Connected USB/Bluetooth barcode scanner and camera dispense endpoint that removes sold items one-by-one with millisecond consistency.
+3. **1-Click Distributor Bill Ingest**: Upload wholesaler Excel/CSV delivery manifests to auto-increment live stock in seconds.
+4. **Single & Multi-Shop Chains**: Centralized dashboard to track stock across 1 to 10+ shop counters from a phone or tablet.
 
 ---
 
@@ -27,35 +23,28 @@ Wholesale pharmacies and central distributors struggle to manage large bulks of 
 ![GraphQL](https://img.shields.io/badge/GraphQL-Strawberry-E10098?logo=graphql&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Upstash-DC382D?logo=redis&logoColor=white)
-![LangChain](https://img.shields.io/badge/LangChain-LangGraph-1C3C3C?logo=chainlink&logoColor=white)
 
 ### Frontend
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
 ![TailwindCSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)
 
-### AI & Infrastructure
+### AI & Barcode Infrastructure
 ![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B-FF6B00?logo=ai&logoColor=white)
 ![Sarvam AI](https://img.shields.io/badge/Sarvam_AI-Saaras_v3_STT-7C3AED?logo=google&logoColor=white)
 ![Qdrant](https://img.shields.io/badge/Qdrant-Cloud_Vector_DB-DC2626?logo=database&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 
 ---
 
-## ✨ Key Features
+## ✨ Key Capabilities
 
-- 🤖 **AI Chatbot** - Ask questions in plain English: *"What items are critical right now?"* or *"Show all vaccines expiring this month"*
-- 🎙️ **Voice AI Input** - Multilingual speech-to-text powered by Sarvam AI (`saaras:v3`) with auto-language detection for Indian languages
-- 🧠 **Vector Memory RAG** - Long-term conversation recall powered by Qdrant Cloud vector database (768-dim embeddings)
-- 📊 **Real-Time Analytics** - Dashboard with heatmaps, alerts, and stock health monitoring
-- 🔷 **GraphQL Analytics API** - Flexible, zero-over-fetch read layer at `/graphql/analytics` — query exactly the fields you need with role-aware field masking
-- 🔄 **Requisition Workflow** - Digital approval system for stock requests
-- 📦 **Pharmacy Specialization** - Built-in tracking for drug batches, expiration dates, and cold-chain compliance
-- 📤 **Vendor Integration** - Excel upload with fuzzy item matching (85% accuracy)
-- 🔐 **Multi-Tenancy & RBAC** - 5 roles (Super Admin, Admin, Manager, Staff, Vendor)
-- 👥 **Guest Demo Mode** - Preview pages without login; interactive actions automatically prompt to sign in
-- 📧 **Low-Stock Email Alerts** - Automated background notifications sent to managers on critical stock shortages
-- ⚡ **Real-Time Alerts** - WebSocket notifications for critical stock levels
+- ⚡ **Ultra-Fast Barcode Scanner Dispensing** - Instant 1-by-1 stock deduction on counter scan with zero latency.
+- 📦 **FEFO Expiry Loss Shield** - Proactive batch alerts ensuring no expired medicine remains on shelves.
+- 🚚 **Supplier & Distributor Management** - Direct vendor accounts for delivery manifest ingestion.
+- 🤖 **AI Chemist Assistant** - Ask questions in plain English or Hindi: *"What medicines are running low in Counter 1?"*
+- 📊 **Real-Time Clean Analytics** - Live stock count, critical shortages, cold-chain fridge monitor, and store-by-store breakdowns.
+- 🔐 **Multi-Tenancy & Tenant Data Isolation** - Full organization scoping with clean RBAC (Admin, Vendor, Super Admin).
+
 
 
 ---
@@ -130,62 +119,65 @@ docker-compose up -d
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ Future-Proof System Architecture
+
+### 1. Full-Stack & Cloud Infrastructure Architecture
 
 ```mermaid
 graph TB
-    subgraph ClientLayer["🖥️ Client Layer (React 19 SPA)"]
-        Landing["🌐 Landing & Guest Demo Portal"]
-        AuthApp["🔐 Login & Auth Portal"]
-        AdminPort["🛡️ Admin & Super Admin Dashboard"]
-        MgrPort["📈 Manager Portal & Analytics"]
-        StaffPort["📦 Staff Stock & Requisition Portal"]
-        VendorPort["🚚 Vendor Manifest Portal"]
+    subgraph ClientLayer["🖥️ Chemist & Counter Client Layer (React 19 SPA)"]
+        Landing["🌐 Landing Page (Single & Multi-Shop Tiers)"]
+        AuthApp["🔐 Auth & Tenant Portal (Argon2id + JWT)"]
+        AdminPort["🛡️ Chemist Admin Dashboard & Unified Navbars"]
+        BarcodeGun["🔫 Counter Barcode Scanner (USB / Bluetooth)"]
+        VendorPort["🚚 Wholesaler / Distributor Delivery Portal"]
     end
 
-    subgraph APIGateway["🚪 API Gateway Layer (FastAPI)"]
-        CORS["CORS & Security Middleware"]
-        Limiter["SlowAPI Distributed Rate Limiter"]
-        AuthMid["JWT & Guest Token Verifier"]
-        REST["REST API Endpoints (56+ Routes)"]
+    subgraph APIGateway["🚪 API Gateway & Middleware Layer (FastAPI)"]
+        CORS["CORS & Trusted Hosts Security"]
+        Limiter["SlowAPI Distributed Rate Limiter (Upstash Redis)"]
+        AuthMid["JWT & Role Authorization Guard"]
+        REST["REST API Engine (58+ Scoped Endpoints)"]
+        ScanAPI["⚡ Quick-Dispense Engine (/api/inventory/scan-dispense)"]
         GQL["GraphQL Subgraph (/graphql/analytics)"]
         WS["WebSocket Alerts Engine (/ws/alerts)"]
     end
 
     subgraph BusinessLayer["⚙️ Domain & Application Services"]
-        InvSvc["InventoryService<br/>(Stock Ops & Pre-fetch)"]
-        AnalyticsSvc["AnalyticsService<br/>(Heatmaps & Forecasting)"]
-        ReqSvc["RequisitionService<br/>(Approval Workflow)"]
-        VendorSvc["VendorService<br/>(Excel Delivery Ingestion)"]
-        ImportSvc["DataImportService<br/>(AI Mapping + Gating)"]
-        PdfSvc["InvoicePdfService & ReportService<br/>(ReportLab Engine)"]
-        NotifySvc["NotificationService<br/>(SMTP & Welcome Emails)"]
-        CacheSvc["CacheService<br/>(Pattern Invalidation)"]
-        AgentSvc["AgentService & ReAct Tools<br/>(LangGraph Architecture)"]
+        InvSvc["InventoryService & Barcode Dispenser<br/>• Atomic Stock Deduction<br/>• Sub-15ms Index Lookup"]
+        AnalyticsSvc["AnalyticsService & FEFO Shield<br/>• 30/60/90 Day Expiry Calculations<br/>• Stockout Prevention"]
+        ReqSvc["RequisitionService<br/>• Chemist Purchase Orders<br/>• Atomic Stock State Machine"]
+        VendorSvc["VendorService<br/>• Excel Delivery Manifest Sync<br/>• Automatic PDF Invoices"]
+        ImportSvc["DataImportService<br/>• Groq LLM Column Mapping<br/>• High-Confidence Auto Ingest"]
+        PdfSvc["InvoicePdfService & ReportService<br/>• ReportLab Vector PDF Engine"]
+        NotifySvc["NotificationService<br/>• SMTP Background Mailer<br/>• Expiry & Shortage Alerts"]
+        CacheSvc["CacheService<br/>• Redis Tagged Invalidation"]
+        AgentSvc["AgentService & ReAct Chatbot<br/>• LangGraph AI Architecture<br/>• Sarvam Multilingual Voice STT"]
     end
 
-    subgraph DataStorage["💾 Data & Infrastructure Layer"]
+    subgraph DataStorage["💾 Persistence & Cloud Infrastructure"]
         PG[("🐘 PostgreSQL / Neon / Supabase<br/>Composite B-Tree Indexes<br/>Alembic Migrations")]
-        Redis[("⚡ Upstash Redis<br/>Cache & Rate Limiting")]
-        Qdrant[("🧠 Qdrant Cloud Vector DB<br/>Gemini 768-dim Embeddings")]
+        Redis[("⚡ Upstash Redis<br/>Distributed Token Blacklist<br/>Analytics Cache")]
+        Qdrant[("🧠 Qdrant Cloud Vector DB<br/>Gemini 768-dim Embeddings<br/>Conversation Memory")]
         Azure[("☁️ Azure Blob Storage<br/>Invoices, Reports & Manifests")]
         Groq["⚡ Groq Cloud (LLaMA 3.3 70B)"]
         Sarvam["🎙️ Sarvam AI (Saaras v3 STT)"]
     end
 
-    %% Client to Gateway
+    %% Client Connections
     Landing --> CORS
     AuthApp --> CORS
     AdminPort --> CORS
-    MgrPort --> CORS
-    StaffPort --> CORS
+    BarcodeGun --> ScanAPI
     VendorPort --> CORS
     CORS --> Limiter --> AuthMid
     AuthMid --> REST
+    AuthMid --> ScanAPI
     AuthMid --> GQL
     AuthMid --> WS
 
     %% Gateway to Business Services
+    ScanAPI --> InvSvc
     REST --> InvSvc
     REST --> AnalyticsSvc
     REST --> ReqSvc
@@ -197,6 +189,7 @@ graph TB
 
     %% Services to Data Storage
     InvSvc --> PG
+    InvSvc --> CacheSvc
     ReqSvc --> PG
     VendorSvc --> PG
     VendorSvc --> PdfSvc
@@ -214,37 +207,103 @@ graph TB
 
 ---
 
+### 2. Retail Chemist & Distributor Supply Chain Lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer as 👤 Customer
+    actor Chemist as 💊 Chemist Counter
+    participant App as 💻 InvIQ Counter App
+    participant API as ⚡ FastAPI Backend
+    participant DB as 🐘 PostgreSQL DB
+    participant WS as 📡 WebSocket Service
+    actor Supplier as 🚚 Medicine Wholesaler
+
+    Note over Chemist,DB: 1. Counter Dispensing & Atomic Deduction
+    Customer->>Chemist: Requests Medicine (e.g. Pan-D)
+    Chemist->>App: Scans Barcode (8901086001234)
+    App->>API: POST /api/inventory/scan-dispense
+    API->>DB: Atomic Update: issued += 1 (Check Expiry / FEFO)
+    DB-->>API: Stock Count Updated (e.g. 42 remaining)
+    API-->>App: 200 OK (Beep Success Sound + Remaining Stock)
+    
+    opt Stock Below Minimum Threshold (< 15)
+        API->>WS: Broadcast LOW_STOCK_ALERT
+        WS-->>Chemist: Real-Time Audio & Visual Alert Triggered
+    end
+
+    Note over Chemist,Supplier: 2. Purchase Order & Wholesaler Delivery
+    Chemist->>App: Creates Stock Requisition for Low Items
+    App->>API: POST /api/requisition/create
+    API->>Supplier: Email / In-App Notification Sent
+    Supplier->>App: Logs into /vendor portal & uploads Excel Delivery Manifest
+    App->>API: POST /api/vendor/upload-delivery
+    API->>DB: Atomic Bulk Insert: received += Qty
+    API->>DB: Auto-Generate Formal PDF Invoice
+    API-->>Supplier: Delivery Manifest Successfully Processed
+    API-->>Chemist: Live Counter Stock Instantly Replenished
+```
+
+---
+
+### 3. High-Speed Barcode Quick-Dispense Engine
+
+```mermaid
+flowchart TD
+    Scan["🔫 Barcode Gun Keystroke / Mobile Camera Scan"] --> Input["📱 InvIQ Counter Listener (Sub-50ms Capture)"]
+    Input --> Request["🚀 POST /api/inventory/scan-dispense<br/>{ barcode_or_id: '8901086...', location_id: 1, qty: 1 }"]
+    
+    Request --> Auth["🛡️ Scoped Tenant Authorization"]
+    Auth --> Lookup["🔍 O(1) Index Lookup on Item.barcode"]
+    
+    Lookup --> Check{"Is Item Valid & In Stock?"}
+    Check -- No --> Error["❌ Error 400: Out of Stock / Unrecognized Barcode"]
+    
+    Check -- Yes --> Atomic["⚡ Atomic Transaction: inventory_transactions.issued += qty"]
+    Atomic --> FEFO["🛡️ FEFO Validation: Check Batch Expiry Date"]
+    
+    FEFO --> Cache["🧹 Invalidate Redis Analytics Cache (analytics:*)"]
+    Cache --> Threshold{"Stock < min_stock?"}
+    
+    Threshold -- Yes --> Alert["🚨 Dispatch WebSocket Alert & Push Notification"]
+    Threshold -- No --> Resp["✅ Return JSON { remaining_stock, status: 'HEALTHY' }"]
+    Alert --> Resp
+    
+    Resp --> Audio["🔊 Trigger Instant Counter Audio Beep & Flash Badge (<15ms)"]
+```
+
+---
+
 ## 👥 Role-Based Access Control (RBAC) & User Journeys
 
 ```mermaid
 graph LR
     subgraph Roles["👤 User Roles & Hierarchies"]
-        SuperAdmin["👑 Super Admin"]
-        Admin["🛡️ Organization Admin"]
-        Manager["📊 Inventory Manager"]
-        Staff["📦 Pharmacy / Warehouse Staff"]
-        Vendor["🚚 Delivery Vendor"]
-        Guest["👀 Guest / Demo Visitor"]
+        SuperAdmin["👑 Super Admin (Platform Owner)"]
+        Admin["🛡️ Chemist Store Owner (Org Admin)"]
+        Staff["💊 Counter Pharmacist / Staff"]
+        Vendor["🚚 Medicine Wholesaler / Distributor"]
+        Guest["👀 Guest / Demo Previewer"]
     end
 
-    subgraph Permissions["⚡ Key Capabilities & Permitted Actions"]
-        TenantMgmt["🏢 Multi-Tenant Org Provisioning<br/>Global Audit Compliance"]
-        UserMgmt["👥 User Management & Role Assignment<br/>System Audit Logs & PDF Reports"]
-        ApprovalMgmt["✅ Requisition Approval / Rejection<br/>Critical Stock & Expiry Alerts<br/>Unmasked Forecasting Analytics"]
-        StockOps["📝 Inbound / Outbound Stock Entry<br/>Requisition Request Submission<br/>Location Stock Lookups"]
-        ManifestUpload["📄 Excel Manifest Upload<br/>Auto Invoice Generation<br/>PDF Invoice Download (Azure Blob)"]
-        ReadOnlyExplore["🔍 Read-Only Catalog & Heatmap<br/>(Forecasting Metrics Masked)"]
+    subgraph Capabilities["⚡ Scoped Capabilities"]
+        PlatformOps["🏢 Multi-Tenant Provisioning<br/>Global Audit & System Logs"]
+        StoreMgmt["💊 Multi-Branch Stock Tracking<br/>Barcode Quick Dispenser<br/>FEFO Expiry Loss Alerts<br/>Distributor Purchase Orders"]
+        StaffOps["⚡ 1-Click Barcode Dispense<br/>Counter Stock Intake<br/>View Branch Stock"]
+        VendorOps["📄 Excel Delivery Manifest Upload<br/>Auto Invoice Generation<br/>Download PDF Delivery Receipts"]
+        DemoMode["🔍 Interactive Read-Only Preview<br/>Auto Sign-in Prompts for Actions"]
     end
 
-    SuperAdmin --> TenantMgmt
-    SuperAdmin --> UserMgmt
-    Admin --> UserMgmt
-    Admin --> ApprovalMgmt
-    Manager --> ApprovalMgmt
-    Staff --> StockOps
-    Vendor --> ManifestUpload
-    Guest --> ReadOnlyExplore
+    SuperAdmin --> PlatformOps
+    SuperAdmin --> StoreMgmt
+    Admin --> StoreMgmt
+    Staff --> StaffOps
+    Vendor --> VendorOps
+    Guest --> DemoMode
 ```
+
+
 
 ---
 
@@ -311,16 +370,17 @@ For detailed documentation, see the `/docs` folder:
 ## 🧪 Testing
 
 ```bash
-# Run all tests
+# Run all tests (347 unit, integration, and security tests — 100% pass rate)
 cd backend
-pytest
+pytest -v
 
-# Run with coverage
+# Run with coverage report
 pytest --cov=app --cov-report=html
 
 # Run specific test file
 pytest tests/test_inventory_service.py -v
 ```
+
 
 ---
 

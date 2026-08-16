@@ -53,19 +53,18 @@ InvIQ uses a **REST + GraphQL hybrid** pattern:
 - **Refresh Rotation:** Old refresh token is blacklisted after successful exchange
 - **Login Lockout:** 5 failed attempts → 15 minutes lockout (Redis-tracked)
 
-### 2. Authorization — 5-Tier RBAC
+### 2. Authorization — 4-Tier RBAC
 
-Permissions are cumulative (higher roles inherit lower permissions):
+Permissions follow the system role hierarchy:
 
 | Role | Level | Access |
 |------|-------|--------|
-| `super_admin` | 6 | Cross-tenant platform management, organization provisioning |
-| `admin` | 5 | Tenant-level administration, audit logs, user provisioning, reports |
-| `manager` | 4 | Requisition approval/rejection, full GraphQL privileged fields |
-| `staff` | 3 | Basic inventory transactions, requisition creation |
-| `vendor` | 2 | Excel manifest uploads, inventory ingestion |
+| `super_admin` | 4 | Global cross-tenant platform governance, organization provisioning, system audit logs |
+| `admin` | 3 | Chemist store / pharmacy tenant administration, audit logs, staff provisioning, requisition approval |
+| `staff` | 2 | Billing counter operations, 1-click barcode quick dispensing, stock intake, requisition requests |
+| `vendor` | 1 | Wholesaler portal, Excel delivery manifest upload, automated PDF invoice download |
 
-> **GraphQL field masking:** `manager`, `admin`, and `super_admin` callers receive full values for `avgDailyUsage`, `daysRemaining`, and `leadTimeDays`. `guest`, `vendor`, and `staff` callers receive `null` for these fields.
+> **GraphQL field masking:** `admin` and `super_admin` callers receive full values for `avgDailyUsage`, `daysRemaining`, and `leadTimeDays`. `guest`, `vendor`, and `staff` callers receive `null` for these forecasting fields.
 
 ### 3. Guest Demo Mode (Unauthenticated Access)
 
@@ -73,6 +72,7 @@ Permissions are cumulative (higher roles inherit lower permissions):
 - **GraphQL:** Same model — unauthenticated callers see all non-privileged fields; forecasting fields masked to `null`.
 - **POST/PUT/DELETE endpoints:** Strict authentication — frontend redirects to `/signin`.
 - **401 Interceptor:** Only triggers redirect if request originally carried a token (session expired).
+
 
 ### 4. Rate Limiting
 

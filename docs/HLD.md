@@ -1,65 +1,63 @@
-# High-Level Design (HLD) - InvIQ Smart Inventory Assistant
+# High-Level Design (HLD) - InvIQ Retail Chemist & Multi-Pharmacy Operating System
 
-**Version:** 5.0  
-**Last Updated:** July 24, 2026  
+**Version:** 6.0  
+**Last Updated:** August 16, 2026  
 **Author:** Sayandip Bar
 
 ---
 
 ## 1. Problem Statement
 
-Healthcare facilities struggle with manual inventory management, leading to stockouts of critical medical supplies, expired medications, and inefficient procurement. Staff spend hours on spreadsheets, lack real-time visibility, and cannot predict shortages before they become critical. InvIQ solves this by providing an AI-powered inventory management system that automates tracking, predicts shortages, and enables intelligent decision-making through natural language queries.
+Independent retail chemist shops and local pharmacy chains in Tier-2/3 cities lose substantial profit margins due to **expired medications (FEFO loss)**, sudden customer stockouts, and tedious distributor billing. Chemist owners rely on outdated software or manual registers, lacking real-time visibility across branches or connected counter scanning. **InvIQ automates this inventory with FEFO expiry tracking, millisecond barcode quick-dispensing, distributor Excel synchronization, and natural language AI queries.**
 
 ---
 
 ## 2. Who Are the Users?
 
 ### Primary Users
-- **Hospital Administrators** - Oversee multiple locations, need consolidated reports
-- **Inventory Managers** - Approve requisitions, monitor stock levels
-- **Medical Staff** - Record stock usage, create requisition requests
-- **Vendors** - Upload delivery manifests via Excel
+- **Pharmacy & Chemist Store Owners (Admin)** - Own 1 to 5+ medical store counters; need live stock, zero expiry loss, and distributor oversight.
+- **Medicine Distributors & Wholesalers (Vendors)** - Supply medicines and ingest delivery manifests via Excel/CSV.
+- **Counter Pharmacists / Staff** - Use barcode scanners at billing counters for instantaneous 1-by-1 stock deduction.
+- **Platform Super Admin** - Multi-tenant platform management and system governance.
 
 ### Pain Points Solved
-- ❌ Manual stock counting → ✅ Automated transaction tracking
-- ❌ Delayed shortage alerts → ✅ Real-time critical stock notifications
-- ❌ Complex data analysis → ✅ AI chatbot answers questions in plain English
-- ❌ Paper-based requisitions → ✅ Digital approval workflow
-- ❌ Vendor coordination chaos → ✅ Excel upload with fuzzy item matching
+- ❌ Medicine expiry on shelves → ✅ Proactive 30/60/90-day FEFO alerts for distributor returns
+- ❌ Slow manual stock deduction → ✅ Millisecond Barcode / USB Scanner Quick Dispensing
+- ❌ Fragmented distributor paper bills → ✅ 1-Click Excel delivery manifest ingestion
+- ❌ Disconnected branch counters → ✅ Real-time multi-branch stock synchronization
 
 ---
 
 ## 3. System Overview
 
-**InvIQ** is an AI-powered inventory management platform that tracks medical supplies across multiple healthcare locations. It provides:
+**InvIQ** is an AI-powered retail chemist and pharmacy inventory operating system that tracks medicine batches across pharmacy shops. It provides:
 
-1. **Real-time inventory tracking** with automatic stock calculations
-2. **AI chatbot** powered by LangGraph ReAct agent with 9 inventory tools for natural language queries
-3. **Requisition workflow** with approval/rejection system
-4. **Vendor integration** via Excel upload with item matching
-5. **Analytics dashboard** with heatmaps and critical alerts
-6. **GraphQL analytics layer** via Strawberry — role-aware resolvers at `/graphql/analytics`
-7. **Multi-tenancy** supporting multiple organizations
-8. **Guest Demo Mode** permitting unauthenticated dashboard and chat access
-9. **Low-stock email alerts** dispatched to managers on critical stock shortages
-10. **PDF report generation** for inventory, transactions, and requisitions
-11. **Alembic migrations** for production-safe database schema management
+1. **Ultra-Fast Barcode Scanner Dispensing** - Instant 1-by-1 stock deduction on counter scan with zero latency.
+2. **FEFO Expiry Loss Shield** - Proactive batch expiry tracking (30/60/90 days).
+3. **Supplier / Distributor Management** - Direct vendor accounts for delivery manifest ingestion.
+4. **Distributor Excel Ingestion** - Automatic live stock replenishment from wholesaler manifests.
+5. **Real-Time Analytics & Unified Sticky Navbars** - Clean store breakdown, cold-chain fridge monitor, and critical shortage alerts.
+6. **Multi-Tenancy & Tenant Data Isolation** - Scoped organization architecture supporting Single Pharmacy and Multiple Pharmacy tiers.
+
 
 ---
 
 ## 4. Scope
 
 ### ✅ In Scope
-- Multi-location inventory tracking
-- AI-powered natural language queries
-- Requisition approval workflow
-- Vendor Excel upload integration
-- Real-time stock alerts (WebSocket) & Low-stock email alerts (SMTP)
-- Role-based access control (5 roles: super_admin, admin, manager, staff, vendor) + Guest Demo Mode
-- Analytics dashboard with caching
-- Multi-tenancy (organization isolation)
-- Audit logging for compliance
-- PDF report generation
+- Multi-location retail chemist & multi-pharmacy inventory tracking
+- Instant 1-by-1 Barcode Quick Dispense (`/api/inventory/scan-dispense`)
+- Proactive FEFO (First Expiry, First Out) 30/60/90-day expiry loss protection
+- AI-powered natural language queries (English & Hindi voice via Sarvam AI)
+- Requisition approval workflow & PO generation
+- Wholesaler/Distributor Excel upload manifest integration & auto-generated PDF invoices
+- Real-time stock alerts (WebSocket via Redis Pub/Sub) & Low-stock email alerts (SMTP)
+- Role-based access control (4 roles: super_admin, admin, staff, vendor) + Guest Demo Mode
+- Analytics dashboard with Upstash Redis caching & local in-memory fallback
+- Multi-tenancy (organization isolation: Single Pharmacy & Multi-Pharmacy tiers)
+- Audit logging for regulatory compliance
+- Automated Celery Beat scheduled audits (FEFO, Stock shortage, Cold-Chain monitoring)
+
 
 ### ❌ Out of Scope
 - Barcode/RFID scanning (future)
@@ -194,27 +192,29 @@ Healthcare facilities struggle with manual inventory management, leading to stoc
 │                                                                              │
 │  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────┐  │
 │  │  PostgreSQL          │  │  Upstash Redis       │  │  Qdrant Cloud    │  │
-│  │  (Neon)              │  │  (REST API)          │  │  (Vector Store)  │  │
+│  │  (Neon / Supabase)   │  │  (REST & Pub/Sub)    │  │  (Vector Store)  │  │
 │  │                      │  │                      │  │                  │  │
-│  │  Tables:             │  │  Keys:               │  │  Collection:     │  │
-│  │  - organizations     │  │  - token_blacklist:* │  │  - chat_memory   │  │
-│  │  - users             │  │  - lockout:*         │  │                  │  │
-│  │  - locations         │  │  - analytics:*       │  │  Embeddings:     │  │
-│  │  - items             │  │  - dashboard:*       │  │  - 384 dims      │  │
-│  │  - inventory_trans   │  │  - cache:*           │  │  - all-MiniLM-   │  │
-│  │  - requisitions      │  │                      │  │    L6-v2         │  │
+│  │  Tables (13 total):  │  │  Channels & Keys:    │  │  Collection:     │  │
+│  │  - organizations     │  │  - inviq:ws:alerts   │  │  - chat_memory   │  │
+│  │  - users (Enum role) │  │  - token_blacklist:* │  │                  │  │
+│  │  - locations         │  │  - lockout:*         │  │  Embeddings:     │  │
+│  │  - items             │  │  - analytics:*       │  │  - 768 dims      │  │
+│  │  - inventory_trans   │  │  - cache:*           │  │  - Gemini        │  │
+│  │  - requisitions      │  │                      │  │    Embedding     │  │
 │  │  - requisition_items │  │  TTL:                │  │  - Semantic      │  │
 │  │  - vendor_uploads    │  │  - 2-5 min (cache)   │  │    search        │  │
-│  │  - chat_sessions     │  │  - 30 min (tokens)   │  │  - Session-based │  │
-│  │  - chat_messages     │  │  - 15 min (lockout)  │  │    context       │  │
-│  │  - audit_logs        │  │                      │  │                  │  │
-│  │                      │  │  Fallback:           │  │  Fallback:       │  │
-│  │  Features:           │  │  - In-memory dict    │  │  - Disabled      │  │
-│  │  - ACID compliance   │  │    (dev only)        │  │    gracefully    │  │
-│  │  - Foreign keys      │  │                      │  │                  │  │
-│  │  - Indexes           │  │                      │  │                  │  │
+│  │  - vendor_invoices   │  │  - 30 min (tokens)   │  │  - Session-based │  │
+│  │  - data_import_jobs  │  │  - 15 min (lockout)  │  │    context       │  │
+│  │  - import_quarantine │  │                      │  │                  │  │
+│  │  - chat_sessions     │  │  Fallback:           │  │  Fallback:       │  │
+│  │  - chat_messages     │  │  - In-memory dict    │  │  - Disabled      │  │
+│  │  - audit_logs        │  │    with TTL & SCAN   │  │    gracefully    │  │
+│  │                      │  │                      │  │                  │  │
+│  │  Features:           │  │  Pub/Sub:            │  │                  │  │
+│  │  - ACID compliance   │  │  - Cross-process WS  │  │                  │  │
+│  │  - Composite Indexes │  │    broadcast         │  │                  │  │
+│  │  - DB Enums          │  │                      │  │                  │  │
 │  │  - Connection pool   │  │                      │  │                  │  │
-│  │  - Retry logic (3x)  │  │                      │  │                  │  │
 │  │  - Alembic migrations│  │                      │  │                  │  │
 │  └──────────────────────┘  └──────────────────────┘  └──────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -224,19 +224,20 @@ Healthcare facilities struggle with manual inventory management, leading to stoc
 
 | Component | Responsibility |
 |-----------|---------------|
-| **React Frontend** | User interface, 5 role-based portals (Super Admin, Admin, Manager, Staff, Vendor) + Guest Demo Mode, real-time WebSocket updates |
-| **FastAPI Backend** | REST API (56+ endpoints), authentication, business logic orchestration |
+| **React Frontend** | Single responsive SPA (Desktop Sidebar / Mobile Bottom Nav), 4 role-based views (Super Admin, Admin, Staff, Vendor) + Guest Demo Mode, real-time WebSocket updates |
+| **FastAPI Backend** | REST API (58+ endpoints), JWT authentication, business logic orchestration |
 | **Domain Layer** | Repository protocols (Protocol classes), value objects (StockStatus, StockThresholds, ReorderPolicy), domain calculations |
 | **GraphQL Layer (Strawberry)** | Read-only analytics API at `/graphql/analytics` — 5 queries, role-aware field masking, shared Redis cache with REST |
 | **AI Agent Service** | LangGraph ReAct agent with 9 tools, natural language processing, voice transcription (Sarvam AI) |
-| **Analytics Service** | Dashboard stats, heatmaps, critical alerts with Redis caching — shared by REST and GraphQL |
-| **Inventory Service** | Stock tracking, transaction management, reorder calculations, WebSocket alert triggers |
+| **Analytics Service** | Dashboard stats, heatmaps, critical alerts with Redis caching & local in-memory fallback |
+| **Inventory Service** | High-speed barcode dispense, stock tracking, transaction management, reorder calculations, WebSocket alert triggers |
 | **Requisition Service** | Approval workflow, status management, inventory updates |
-| **Vendor Service** | Excel parsing, item matching, bulk transaction creation |
-| **Report Service** | PDF report generation for inventory, transactions, requisitions |
-| **PostgreSQL** | Primary data store (11 tables, Alembic migrations) |
-| **Upstash Redis** | Distributed cache, token blacklist, login attempt tracking |
+| **Vendor Service** | Excel delivery manifest parsing, item matching, bulk transaction creation, auto-invoicing |
+| **Celery Worker & Beat** | Scheduled background audits: FEFO expiry (every 6h), stock shortage (hourly), cold-chain monitor (every 30m) |
+| **PostgreSQL** | Primary multi-tenant relational store (13 tables, DB Enums, composite indexes, Alembic migrations) |
+| **Upstash Redis** | Distributed cache, Pub/Sub alert broker, token blacklist, login attempt tracking |
 | **Qdrant Cloud** | Vector database for AI semantic memory and RAG context |
+
 
 ---
 

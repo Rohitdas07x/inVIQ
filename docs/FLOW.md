@@ -59,10 +59,11 @@ core/dependencies.py:require_admin
       → core/security.py:check_role_permission        (ROLE_HIERARCHY dict lookup)
 ```
 
-- `require_staff` → requires role ≥ staff (3)
-- `require_manager` → requires role ≥ manager (4)
-- `require_admin` → requires role ≥ admin (5)
-- `require_super_admin` → role must exactly equal `"super_admin"` (direct check, not hierarchy)
+- `require_vendor` → requires role ≥ vendor (1)
+- `require_staff` → requires role ≥ staff (2)
+- `require_admin` → requires role ≥ admin (3)
+- `require_super_admin` → requires role = super_admin (4)
+
 
 ---
 
@@ -614,16 +615,27 @@ api/routes/websocket.py:websocket_alerts
   → [invalid token] websocket.close(4001)
   → ConnectionManager.connect(websocket)      (accept + add to active_connections list)
   → [ping received] websocket.send_json({"type": "pong"})
-  → [pending_alerts] drain pending_alerts list → ConnectionManager.broadcast(alert)
-      → [for each connection] websocket.send_json(alert)
   → [WebSocketDisconnect] ConnectionManager.disconnect(websocket)
 ```
 
-**Branches**:
-- Alerts are queued by `inventory_service.py:InventoryService.add_transaction` via `queue_websocket_alert()` when stock drops below min_stock
-- The WebSocket receive loop only drains pending alerts when the client sends any message; alerts may be delayed if client is quiet
+**Pub/Sub Broadcast Flow**:
+```
+inventory_service.py (or background_tasks.py)
+  → queue_websocket_alert(alert)
+      → Redis.publish("inviq:ws:alerts", json_payload)   [Primary multi-worker path]
+          → start_redis_subscriber() (Async lifespan listener)
+              → ConnectionManager.broadcast(alert)
+                  → [for each connection] websocket.send_json(alert)
+      OR → In-process pending_alerts list                [Local / dev fallback path]
+```
 
-**Side effects**: None (read-only broadcast; alert data comes from `pending_alerts` list written by inventory service)
+**Branches**:
+- Alerts are queued by `inventory_service.py` upon stock deduction / threshold breaches and by Celery background audits upon FEFO expiry identification
+- Redis Pub/Sub dispatches alerts instantly across all worker processes without waiting for client pings
+- In fallback single-worker mode without Redis, pending alerts are drained during the ping loop
+
+**Side effects**: Push notification to active frontend client sockets
+
 
 ---
 
@@ -760,11 +772,13 @@ STARTUP:
   → infrastructure/database/connection.py:Base.metadata.create_all(bind=engine)
       → SQLAlchemy CREATE TABLE IF NOT EXISTS for all models
   → app/main.py:seed_admin_user()
-      → DB SELECT users WHERE role='admin'
+      → DB SELECT users WHERE role='super_admin' / role='admin'
       → [no admin found] core/security.py:hash_password → DB INSERT users
   → infrastructure/cache/redis_client.py:get_redis()   (ping Upstash, log status)
+  → api/routes/websocket.py:start_redis_subscriber()   (asyncio task subscribed to inviq:ws:alerts)
 
 SHUTDOWN:
+  → subscriber_task.cancel()                            (cancel WebSocket Redis listener)
   → infrastructure/cache/redis_client.py:close_redis()  (clear singleton reference)
   → infrastructure/database/connection.py:engine.dispose()   (close connection pool)
 ```
@@ -772,15 +786,16 @@ SHUTDOWN:
 **Branches**:
 - Admin already exists → seed skipped (idempotent)
 - `LANGCHAIN_API_KEY` not set → LangSmith tracing stays disabled
-- Redis unavailable → logged as warning, server starts without cache
+- Redis unavailable → logged as warning, server starts with local in-memory cache and in-process WebSocket queue
 
 ---
 
-## ⚠️ Unreferenced / Notable Dead-End Observations
+## ⚠️ Unreferenced / Notable Observations
 
 - **`get_optional_user` in `chat.py`** — imported (`from app.core.dependencies import get_current_user, get_optional_user`) but `get_optional_user` is only used in the `GET /chat/suggestions` route. The `POST /chat/query` route uses the strict `get_current_user`.
 - **`github-auth` route** — auth.py contains a `POST /github-auth` endpoint that calls GitHub's OAuth API. The full OAuth code-exchange flow is implemented. Verified present and wired.
-- **`InventoryService._get_recipient_emails` cache** — is a class-level mutable list shared across all instances. Thread-safe under the double-checked lock but the cache is never invalidated when a user's email changes or a user is deactivated; TTL is 60 seconds.
-- **`vendor_upload` cache invalidation gap** — [RESOLVED] Fixed: `POST /vendor/upload-delivery` now calls `cache_invalidate_pattern("analytics:*")` on success.
-- **`pending_alerts` drain** — `queue_websocket_alert` puts alerts in `pending_alerts`. They are only drained inside the WebSocket receive loop when the client sends a message. If no WebSocket clients are connected, alerts are queued but never consumed; the list grows unboundedly until a client connects.
+- **`InventoryService._get_recipient_emails` cache** — is a class-level mutable list shared across all instances. Thread-safe under the double-checked lock; TTL is 60 seconds.
+- **`vendor_upload` cache invalidation** — [RESOLVED] `POST /vendor/upload-delivery` calls `cache_invalidate_pattern("analytics:*")` on success.
+- **`pending_alerts` multi-worker pub/sub** — [RESOLVED] `queue_websocket_alert` publishes to Redis channel `inviq:ws:alerts`. Alerts are broadcast in real-time across workers via `start_redis_subscriber()`.
 - **`seed_chat_memory.py` and `seed_large_data.py`** (backend root) — standalone scripts for seeding Qdrant and DB data. Not wired into any route, cron, or lifecycle hook. Must be run manually.
+

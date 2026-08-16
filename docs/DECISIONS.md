@@ -230,13 +230,36 @@ Each entry records *why* a choice was made — the code itself shows *what* was 
 
 ---
 
-## Composite Database Indexing & Batch State Pre-fetching for O(1) Ingestion
+## PostgreSQL ENUM Types & DB-Level Data Integrity
 
-- **What**: Added composite B-Tree indexes across critical query paths (notably `inventory_transactions (location_id, item_id, date)` and `requisitions (status, urgency)`), consolidated admin dashboard metrics into a single SQL `GROUP BY`, and eliminated N+1 database queries during vendor manifest parsing by pre-fetching location closing stocks in 1 query.
-- **Why**: Transaction history checks were previously executing table scans across all historical inventory rows. Ingestion loops were issuing 2 sequential SQL queries per row (200 roundtrips for 100 rows). Pre-fetching all closing stocks into an in-memory dictionary prior to validation reduces ingestion latency by over 90% and turns per-row stock math into an O(1) in-memory operation.
-- **Alternatives considered**: Row-by-row asynchronous querying — still incurs network roundtrip overhead and database lock contention. Periodic materialization tables — adds complex cron worker synchronization and eventual consistency lag.
-- **Tradeoff accepted**: Composite indexes add negligible disk overhead and tiny write latency overhead during inserts (~0.1ms), drastically outweighed by the 10x–50x read speedup.
+- **What**: Migrated `users.role` and `organizations.plan` from plain unconstrained `VARCHAR(50)` strings to native PostgreSQL `ENUM` types (`user_role` and `org_plan`) with strict driver-level and database-level enforcement via Alembic migration `73a536e2e770`.
+- **Why**: Plain strings allow invalid, corrupted, or typo-prone values (e.g. `role="hacker"` or `role=""`) to bypass application code if inserted via direct SQL, scripts, or migrations. Enforcing native database enums guarantees data integrity at the storage layer while enabling PostgreSQL to store enums compactly as 4-byte integers internally.
+- **Alternatives considered**: Application-only Pydantic/Enum validation — vulnerable to direct DB updates or raw SQL queries. Check constraints (`CHECK (role IN (...))`) — functional, but harder to introspect than native Postgres ENUMs.
+- **Tradeoff accepted**: Altering an existing ENUM type in PostgreSQL requires specific DDL (`ALTER TYPE ... ADD VALUE`), which requires Alembic migrations.
 
+---
 
+## Redis Pub/Sub for Real-Time WebSocket Alerts Across Multi-Worker Deployments
 
+- **What**: Replaced in-process thread-queue WebSocket alert dispatching with Redis Pub/Sub (`inviq:ws:alerts`), connected via an asyncio subscriber background task initialized in FastAPI's `lifespan` context manager.
+- **Why**: In production environments running multi-worker Uvicorn processes or horizontal container instances, an in-process Python queue (`threading.Lock` + `list`) fails silently: a transaction alert emitted on Worker A is never visible to the WebSocket client connected to Worker B. Redis Pub/Sub provides sub-millisecond, cross-process broadcast to all active WebSocket clients regardless of which worker holds their TCP connection.
+- **Alternatives considered**: Database polling for alerts — adds heavy database read load and latency. Single-worker Uvicorn restriction — cannot utilize multi-core server hardware.
+- **Tradeoff accepted**: Requires Redis to be configured for multi-worker production. Maintained an automatic in-process queue fallback for single-worker local development and unit test environments where Redis is not running.
 
+---
+
+## `get_db_context()` Context Manager for Celery Scheduled Workers
+
+- **What**: Created `get_db_context()` context manager in `connection.py` providing transactional `with get_db_context() as db:` sessions with automatic commit on success and rollback on exception.
+- **Why**: Celery background tasks (`celery_fefo_audit`, `celery_stock_audit`, `celery_cold_chain_check`) run outside the FastAPI HTTP request cycle and cannot use FastAPI's `Depends(get_db)` generator. A dedicated context manager guarantees that background workers clean up DB connections reliably and prevent connection pool leaks.
+- **Alternatives considered**: Raw `SessionLocal()` manual open/close — prone to leaked connections if exceptions occur before `db.close()`.
+- **Tradeoff accepted**: None; provides clean Pythonic context management everywhere outside HTTP request scopes.
+
+---
+
+## Dual-Layer Caching with Thread-Safe In-Memory Fallback & SCAN Invalidation
+
+- **What**: Upgraded `CacheService` to maintain a thread-safe in-memory cache with timestamp-based TTL eviction alongside Upstash Redis, with `cache_invalidate_pattern()` performing non-blocking SCAN iteration and matching local keys via `fnmatch`.
+- **Why**: In serverless and testing environments where Redis may be unreachable or offline, application caching previously failed or threw exceptions. The dual-layer design ensures that caching works seamlessly in offline mode, local dev, and testing while ensuring that writes invalidate both Redis and local in-memory keys consistently.
+- **Alternatives considered**: Fail without caching when Redis is down — increases DB load on cache misses. Redis `KEYS` command — blocks Redis single-threaded event loop on large keyspaces.
+- **Tradeoff accepted**: In-memory cache in multi-process environments is local to each process; Redis remains the primary shared cache in production.
