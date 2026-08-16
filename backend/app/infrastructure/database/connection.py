@@ -83,14 +83,16 @@ else:
     engine = create_engine_with_retry(
         DATABASE_URL,
         max_retries=3,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=50,
+        max_overflow=50,
+        pool_timeout=30,
         pool_recycle=1800,
         pool_pre_ping=True,
     )
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 
 class Base(DeclarativeBase):
@@ -112,3 +114,57 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+import threading
+
+# ── Query Performance Profiler ─────────────────────────────────────────────
+_query_stats_lock = threading.Lock()
+_query_history = []  # List of {"statement": str, "duration_ms": float}
+
+from sqlalchemy import event
+
+@event.listens_for(engine, "before_cursor_execute")
+def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    context._query_start_time = time.perf_counter()
+
+@event.listens_for(engine, "after_cursor_execute")
+def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    if hasattr(context, "_query_start_time"):
+        duration_ms = (time.perf_counter() - context._query_start_time) * 1000
+        with _query_stats_lock:
+            if len(_query_history) > 10000:
+                _query_history.pop(0)
+            _query_history.append({
+                "statement": statement.strip().replace("\n", " "),
+                "duration_ms": duration_ms,
+            })
+
+def get_query_metrics():
+    """Return a copy of the query timing history."""
+    with _query_stats_lock:
+        return list(_query_history)
+
+def clear_query_metrics():
+    """Clear the query timing history."""
+    with _query_stats_lock:
+        _query_history.clear()
+
+
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_context():
+    """Context-manager version of get_db() for use outside FastAPI request scope."""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+

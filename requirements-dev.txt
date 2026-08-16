@@ -35,3 +35,8 @@ mkdocs-material>=9.5.3
 ipython>=8.19.0
 ipdb>=0.13.13
 memory-profiler>=0.61.0
+
+# -- Load Testing & Performance Benchmarking --------------------------------
+locust>=2.46.0                 # synthetic load testing
+numpy>=1.26.0                  # percentile and latency statistical computation
+

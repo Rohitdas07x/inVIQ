@@ -24,17 +24,23 @@ class UserRepository:
 
     def get_by_email(self, email: str) -> Optional[User]:
         try:
-            return self.db.query(User).filter(User.email == email).first()
+            clean = email.strip().lower()
+            return self.db.query(User).filter(User.email.ilike(clean)).first()
         except SQLAlchemyError as e:
             logger.error("Database error getting user by email: %s", str(e))
             raise DatabaseError(f"Failed to get user: {str(e)}")
 
+
     def get_by_username(self, username: str) -> Optional[User]:
         try:
-            return self.db.query(User).filter(User.username == username).first()
+            clean = username.strip()
+            return self.db.query(User).filter(
+                (User.username.ilike(clean)) | (User.email.ilike(clean))
+            ).first()
         except SQLAlchemyError as e:
             logger.error("Database error getting user by username: %s", str(e))
             raise DatabaseError(f"Failed to get user: {str(e)}")
+
 
     def get_all(self, skip: int = 0, limit: int = 100) -> List[User]:
         try:
@@ -50,6 +56,8 @@ class UserRepository:
         password: str,
         full_name: Optional[str] = None,
         role: str = "staff",
+        org_id: Optional[int] = None,
+        location_ids: Optional[List[int]] = None,
     ) -> User:
         try:
             hashed = hash_password(password)
@@ -59,6 +67,8 @@ class UserRepository:
                 hashed_password=hashed,
                 full_name=full_name,
                 role=role,
+                org_id=org_id,
+                location_ids=location_ids or [],
             )
             self.db.add(user)
             self.db.commit()
@@ -105,11 +115,14 @@ class UserRepository:
         self,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
+        org_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> List[User]:
         try:
             query = self.db.query(User)
+            if org_id is not None:
+                query = query.filter(User.org_id == org_id)
             if role:
                 query = query.filter(User.role == role)
             if is_active is not None:
@@ -123,9 +136,12 @@ class UserRepository:
         self,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
+        org_id: Optional[int] = None,
     ) -> int:
         try:
             query = self.db.query(User)
+            if org_id is not None:
+                query = query.filter(User.org_id == org_id)
             if role:
                 query = query.filter(User.role == role)
             if is_active is not None:
@@ -134,6 +150,7 @@ class UserRepository:
         except SQLAlchemyError as e:
             logger.error("Database error counting filtered users: %s", str(e))
             raise DatabaseError(f"Failed to count filtered users: {str(e)}")
+
 
     def increment_login_attempts(self, user: User) -> User:
         try:

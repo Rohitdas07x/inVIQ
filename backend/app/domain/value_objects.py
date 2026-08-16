@@ -145,8 +145,15 @@ class ReorderPolicy:
 
         Returns 0 if avg_daily_usage ≤ 0 (no usage data) or if current
         stock already exceeds the target buffer.
+        Safely casts Decimal, float, int inputs.
         """
-        if self.avg_daily_usage <= 0:
+        usage = float(self.avg_daily_usage or 0.0)
+        if usage <= 0.0:
             return 0
-        target = self.avg_daily_usage * self.lead_time_days * self.safety_factor
-        return max(0, int(target - current_stock))
+        lead_time = float(self.lead_time_days or 2)
+        safety = float(self.safety_factor or 2.0)
+        stock = float(current_stock or 0)
+        target = usage * lead_time * safety
+        return max(0, int(target - stock))
+
+

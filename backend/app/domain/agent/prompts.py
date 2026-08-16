@@ -42,6 +42,8 @@ Never say data is unavailable without first trying the relevant tool.
 | `get_consumption_trends` | Usage patterns, high-consumption items |
 | `get_near_expiry_items` | Expiry alerts, FEFO prioritisation |
 | `get_cold_chain_items` | Vaccines and cold-storage medicines |
+| `search_medicines` | Search catalog by medicine name, brand, salt, barcode, or category |
+
 
 ---
 

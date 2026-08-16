@@ -11,10 +11,21 @@ from sqlalchemy import (
     Float,
     LargeBinary,
     Index,
+    Enum,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.infrastructure.database.connection import Base
+
+# ── Enum types (enforced at DB driver level) ───────────────────────────────
+_UserRoleEnum = Enum(
+    "super_admin", "admin", "staff", "vendor",
+    name="user_role",
+)
+_OrgPlanEnum = Enum(
+    "single_pharmacy", "multi_pharmacy",
+    name="org_plan",
+)
 
 
 # ── Multi-tenancy root ────────────────────────────────────────────────────
@@ -26,6 +37,7 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), unique=True, nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
+    plan = Column(_OrgPlanEnum, nullable=False, default="single_pharmacy")
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -41,6 +53,8 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         Index("ix_users_role_active", "role", "is_active"),
+        Index("ix_users_org_role", "org_id", "role"),
+        Index("ix_users_email_active", "email", "is_active"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -49,8 +63,8 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(200), nullable=True)
-    role = Column(String(50), nullable=False, default="staff", index=True)
-    location_ids = Column(JSON, default=[])  # Scoped locations for staff/vendor
+    role = Column(_UserRoleEnum, nullable=False, default="staff", index=True)
+    location_ids = Column(JSON, default=list)  # Scoped locations for staff/vendor — default=list avoids shared mutable
     is_active = Column(Boolean, default=True, index=True)
     is_verified = Column(Boolean, default=False)
     login_attempts = Column(Integer, default=0)
@@ -66,12 +80,18 @@ class User(Base):
 
 class Location(Base):
     __tablename__ = "locations"
+    __table_args__ = (
+        Index("ix_locations_org_type", "org_id", "type"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False, index=True)
-    type = Column(String(50), nullable=False, index=True)
+    type = Column(String(50), nullable=False, index=True)  # retail_counter | cold_storage | branch
     region = Column(String(100), nullable=False, index=True)
+    radius_meters = Column(Integer, default=500)  # Counter delivery / geofence radius
+    pincode = Column(String(20), nullable=True)
+    phone = Column(String(30), nullable=True)
     address = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -84,6 +104,8 @@ class Item(Base):
     __tablename__ = "items"
     __table_args__ = (
         Index("ix_items_name_category", "name", "category"),
+        Index("ix_items_org_category", "org_id", "category"),
+        Index("ix_items_barcode_org", "barcode", "org_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -91,8 +113,13 @@ class Item(Base):
     name = Column(String(200), nullable=False, index=True)
     category = Column(String(100), nullable=False, index=True)
     unit = Column(String(50), nullable=False)
-    lead_time_days = Column(Integer, nullable=False)
-    min_stock = Column(Integer, nullable=False)
+    barcode = Column(String(50), nullable=True, index=True)  # EAN-13 = 13 chars; String(50) has safe headroom
+    strength = Column(String(50), nullable=True)
+    mrp = Column(Float, nullable=False, default=0.0)
+    purchase_rate = Column(Float, nullable=False, default=0.0)
+    lead_time_days = Column(Integer, nullable=False, default=2)
+    min_stock = Column(Integer, nullable=False, default=10)
+
 
     # ── Pharmacy-specific field ───────────────────────────────────────────
     storage_temp = Column(String(20), nullable=False, default="ambient")  # ambient | cold_chain
@@ -104,12 +131,16 @@ class Item(Base):
     transactions = relationship("InventoryTransaction", back_populates="item")
 
 
+
 class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
     __table_args__ = (
         Index("ix_inv_tx_loc_item_date", "location_id", "item_id", "date"),
         Index("ix_inv_tx_item_date", "item_id", "date"),
+        Index("ix_inv_tx_closing_date", "closing_stock", "date"),
+        Index("ix_inv_tx_expiry_closing", "expiry_date", "closing_stock"),
     )
+
 
     id = Column(Integer, primary_key=True, index=True)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
@@ -137,7 +168,7 @@ class InventoryTransaction(Base):
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
-    id = Column(String(100), primary_key=True)
+    id = Column(String(36), primary_key=True)  # UUID4 = 36 chars
     user_id = Column(Integer, nullable=False, index=True)
     title = Column(String(200), default="New Conversation")
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -173,6 +204,7 @@ class Requisition(Base):
     __table_args__ = (
         Index("ix_requisitions_status_urgency", "status", "urgency"),
         Index("ix_requisitions_loc_created", "location_id", "created_at"),
+        Index("ix_requisitions_loc_status", "location_id", "status"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -259,7 +291,7 @@ class VendorInvoice(Base):
     total_amount = Column(Float, nullable=False, default=0.0)
     status = Column(String(20), nullable=False, default="ISSUED", index=True)
     pdf_path = Column(String(500), nullable=True)
-    pdf_url = Column(String(1000), nullable=True)
+    pdf_url = Column(Text, nullable=True)  # Azure blob URLs can exceed 1000 chars
     pdf_content = Column(LargeBinary, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now(), index=True)
 
@@ -275,7 +307,10 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (
         Index("ix_audit_logs_action_created", "action", "created_at"),
+        Index("ix_audit_logs_org_created", "org_id", "created_at"),
+        Index("ix_audit_logs_user_created", "user_id", "created_at"),
     )
+
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)

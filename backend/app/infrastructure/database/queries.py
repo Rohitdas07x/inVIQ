@@ -5,8 +5,15 @@ from app.domain.value_objects import StockThresholds
 from datetime import datetime, timedelta
 
 
-def get_latest_stock_health(db: Session):
-    """Get stock health for most recent date across all locations and items"""
+from typing import Optional
+
+def get_latest_stock_health(
+    db: Session,
+    org_id: Optional[int] = None,
+    location_id: Optional[int] = None,
+    category: Optional[str] = None,
+):
+    """Get stock health for most recent date across all locations and items with optional multi-tenant and dimension filters"""
 
     latest_date = db.query(func.max(InventoryTransaction.date)).scalar()
 
@@ -27,7 +34,7 @@ def get_latest_stock_health(db: Session):
         .subquery()
     )
 
-    results = (
+    query = (
         db.query(
             Location.id.label("location_id"),
             Location.name.label("location_name"),
@@ -80,10 +87,17 @@ def get_latest_stock_health(db: Session):
             & (InventoryTransaction.item_id == subq.c.item_id),
         )
         .filter(InventoryTransaction.date == latest_date)
-        .all()
     )
 
-    return results
+    if org_id is not None:
+        query = query.filter(Item.org_id == org_id)
+    if location_id is not None:
+        query = query.filter(Location.id == location_id)
+    if category is not None and category != "ALL":
+        query = query.filter(Item.category == category)
+
+    return query.all()
+
 
 
 def get_critical_alerts(db: Session, severity: str = "CRITICAL"):

@@ -41,25 +41,14 @@ def calculate_reorder_quantity(
     Calculate the recommended reorder quantity.
 
     Formula: max(0, (daily_usage × lead_time × safety_factor) − current_stock)
-
-    This thin wrapper delegates to ReorderPolicy so both APIs (positional
-    legacy and the value-object API) share the same implementation.
-
-    Args:
-        avg_daily_usage: Average units consumed per day (7-day window).
-        lead_time_days:  Supplier lead time in days.
-        current_stock:   Units currently on hand.
-        safety_factor:   Multiplier for safety buffer (default 2.0).
-
-    Returns:
-        Non-negative integer quantity to reorder; 0 if no reorder needed.
     """
     policy = ReorderPolicy(
-        avg_daily_usage=avg_daily_usage,
-        lead_time_days=lead_time_days,
-        safety_factor=safety_factor,
+        avg_daily_usage=float(avg_daily_usage or 0.0),
+        lead_time_days=int(lead_time_days or 2),
+        safety_factor=float(safety_factor or 2.0),
     )
-    return policy.recommended_quantity(current_stock)
+    return policy.recommended_quantity(int(current_stock or 0))
+
 
 
 # ---------------------------------------------------------------------------

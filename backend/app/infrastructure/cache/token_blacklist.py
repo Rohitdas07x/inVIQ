@@ -43,6 +43,14 @@ def blacklist_token(token: str, expires_in_minutes: int = None) -> None:
     if expires_in_minutes is None:
         expires_in_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
+    # Invalidate L1 auth cache immediately
+    try:
+        from app.core.dependencies import _user_auth_cache, _user_auth_cache_lock
+        with _user_auth_cache_lock:
+            _user_auth_cache.pop(token, None)
+    except Exception:
+        pass
+
     r = get_redis()
     if r and is_redis_available():
         try:

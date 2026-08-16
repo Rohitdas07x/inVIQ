@@ -35,6 +35,11 @@ class VectorMemory:
         self._model: str = settings.GEMINI_EMBEDDING_MODEL
         self._dim: int = settings.GEMINI_EMBEDDING_DIM
         self._api_key: Optional[str] = settings.GEMINI_API_KEY
+        self._embedding_cache: Dict[str, List[float]] = {}
+        self._http_client = httpx.Client(
+            timeout=5.0,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
 
         if not settings.QDRANT_ENABLED:
             logger.info("Qdrant disabled via config — running without vector memory")
@@ -61,7 +66,7 @@ class VectorMemory:
             self._client = QdrantClient(
                 url=url,
                 api_key=settings.QDRANT_API_KEY,
-                timeout=10,
+                timeout=5,
             )
             self._ensure_collection()
             self._available = True
@@ -81,62 +86,53 @@ class VectorMemory:
 
     def _ensure_collection(self) -> None:
         """Create or recreate the collection with the correct vector dimensions."""
-        existing_collections = {c.name for c in self._client.get_collections().collections}
-        if self._collection not in existing_collections:
-            self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=VectorParams(
-                    size=self._dim,
-                    distance=Distance.COSINE,
-                ),
-            )
-            logger.info("Qdrant collection created: %s (%dd)", self._collection, self._dim)
-        else:
-            # Verify vector dimension matches Gemini embedding dimension
-            try:
-                info = self._client.get_collection(self._collection)
-                vector_size = getattr(getattr(getattr(info, "config", None), "params", None), "vectors", None)
-                actual_size = getattr(vector_size, "size", None)
-                if actual_size and actual_size != self._dim:
-                    logger.info(
-                        "Recreating Qdrant collection %s to update vector size from %d to %d",
-                        self._collection,
-                        actual_size,
-                        self._dim,
-                    )
-                    self._client.delete_collection(self._collection)
-                    self._client.create_collection(
-                        collection_name=self._collection,
-                        vectors_config=VectorParams(
-                            size=self._dim,
-                            distance=Distance.COSINE,
-                        ),
-                    )
-            except Exception as e:
-                logger.debug("Collection dimension check: %s", e)
+        try:
+            existing_collections = {c.name for c in self._client.get_collections().collections}
+            if self._collection not in existing_collections:
+                self._client.create_collection(
+                    collection_name=self._collection,
+                    vectors_config=VectorParams(
+                        size=self._dim,
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info("Qdrant collection created: %s (%dd)", self._collection, self._dim)
+        except Exception as e:
+            logger.debug("Collection check skipped: %s", e)
 
     def _embed(self, text: str) -> List[float]:
-        """Generate normalized embedding vector via Google Gemini API."""
-        if not text or not text.strip():
+        """Generate normalized embedding vector via Google Gemini API with in-memory caching."""
+        clean_text = (text or "").strip()
+        if not clean_text:
             return [0.0] * self._dim
+
+        if clean_text in self._embedding_cache:
+            return self._embedding_cache[clean_text]
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:embedContent?key={self._api_key}"
         payload = {
-            "content": {"parts": [{"text": text.strip()}]},
+            "content": {"parts": [{"text": clean_text}]},
             "output_dimensionality": self._dim,
         }
 
-        with httpx.Client(timeout=15.0) as http_client:
-            response = http_client.post(url, json=payload)
+        try:
+            response = self._http_client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            return data["embedding"]["values"]
+            vec = data["embedding"]["values"]
+            if len(self._embedding_cache) < 2000:
+                self._embedding_cache[clean_text] = vec
+            return vec
+        except Exception as e:
+            logger.debug("Gemini embedding failed: %s", e)
+            return [0.0] * self._dim
 
     # ── Public API ────────────────────────────────────────────────────────
 
     @property
     def is_available(self) -> bool:
         return self._available
+
 
     def add_message(
         self,
@@ -182,11 +178,22 @@ class VectorMemory:
     def search_relevant(
         self, query: str, n_results: int = 5, exclude_session: str = None
     ) -> List[Dict[str, Any]]:
-        if not self._available or not query or not query.strip():
+        clean_q = (query or "").strip()
+
+        if not self._available or not clean_q:
             return []
 
+        cache_key = f"{clean_q}:{n_results}:{exclude_session}"
+        now = time.time()
+        if hasattr(self, "_search_cache"):
+            cached = self._search_cache.get(cache_key)
+            if cached and now < cached[0]:
+                return cached[1]
+        else:
+            self._search_cache = {}
+
         try:
-            vector = self._embed(query)
+            vector = self._embed(clean_q)
 
             response = self._client.query_points(
                 collection_name=self._collection,
@@ -215,12 +222,14 @@ class VectorMemory:
                 if len(matches) >= n_results:
                     break
 
-                return matches
+            if len(self._search_cache) < 500:
+                self._search_cache[cache_key] = (now + 60.0, matches)
             return matches
 
         except Exception as e:
             logger.warning("Vector memory search failed: %s", e)
             return []
+
 
     def get_stats(self) -> Dict[str, Any]:
         if not self._available:

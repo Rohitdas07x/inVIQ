@@ -11,14 +11,15 @@ from app.core.exceptions import DatabaseError, DuplicateError
 logger = logging.getLogger("smart_inventory.repo.inventory")
 
 
+import time
 class InventoryRepository:
     """Encapsulates all inventory-related database operations."""
 
     def __init__(self, db: Session):
         self.db = db
 
-    def get_all_locations(self) -> List[Location]:
-        return self.db.query(Location).all()
+    def get_all_locations(self, limit: int = 50, offset: int = 0) -> List[Location]:
+        return self.db.query(Location).offset(offset).limit(limit).all()
 
     def get_location_by_id(self, location_id: int) -> Optional[Location]:
         return self.db.query(Location).filter(Location.id == location_id).first()
@@ -41,14 +42,23 @@ class InventoryRepository:
             logger.error("Database error creating location: %s", str(e))
             raise DatabaseError(f"Failed to create location: {str(e)}")
 
-    def get_all_items(self) -> List[Item]:
-        return self.db.query(Item).all()
+    def get_all_items(self, limit: int = 50, offset: int = 0) -> List[Item]:
+        return self.db.query(Item).offset(offset).limit(limit).all()
 
     def get_item_by_id(self, item_id: int) -> Optional[Item]:
         return self.db.query(Item).filter(Item.id == item_id).first()
 
     def get_item_by_name(self, name: str) -> Optional[Item]:
         return self.db.query(Item).filter(Item.name == name).first()
+
+    def get_item_by_barcode(self, barcode: str, org_id: Optional[int] = None) -> Optional[Item]:
+        q = self.db.query(Item).filter(Item.barcode == barcode.strip())
+        if org_id is not None:
+            q = q.filter((Item.org_id == org_id) | (Item.org_id.is_(None)))
+        return q.first()
+
+
+
 
     def create_item(self, **kwargs) -> Item:
         try:
@@ -73,11 +83,12 @@ class InventoryRepository:
             .filter(
                 InventoryTransaction.location_id == location_id,
                 InventoryTransaction.item_id == item_id,
-                InventoryTransaction.date < before_date,
+                InventoryTransaction.date <= before_date,
             )
-            .order_by(InventoryTransaction.date.desc())
+            .order_by(InventoryTransaction.date.desc(), InventoryTransaction.id.desc())
             .first()
         )
+
 
     def get_latest_transaction(
         self, location_id: int, item_id: int
