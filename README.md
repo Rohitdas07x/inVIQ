@@ -43,7 +43,8 @@ Independent retail medical stores and local pharmacy chains in Tier-2/3 cities l
 - 🚚 **Supplier & Distributor Management** - Direct vendor accounts for delivery manifest ingestion.
 - 🤖 **AI Chemist Assistant** - Ask questions in plain English or Hindi: *"What medicines are running low in Counter 1?"*
 - 📊 **Real-Time Clean Analytics** - Live stock count, critical shortages, cold-chain fridge monitor, and store-by-store breakdowns.
-- 🔐 **Multi-Tenancy & Tenant Data Isolation** - Full organization scoping with clean RBAC (Admin, Vendor, Super Admin).
+- 🔐 **Enterprise Multi-Tenant Security** - HttpOnly SameSite auth cookies, strict CSP headers, cross-tenant IDOR boundaries, single-use ticket WebSocket streams, and memory-bounded audio ingestion.
+
 
 
 
