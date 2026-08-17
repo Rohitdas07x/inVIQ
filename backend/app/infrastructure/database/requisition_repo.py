@@ -30,28 +30,37 @@ class RequisitionRepository:
             query = query.options(joinedload(Requisition.items))
         return query.filter(Requisition.id == requisition_id).first()
 
-    def get_with_full_details(self, requisition_id: int) -> Optional[Requisition]:
-        return (
+    def get_with_full_details(self, requisition_id: int, org_id: Optional[int] = None) -> Optional[Requisition]:
+        query = (
             self.db.query(Requisition)
             .options(
                 joinedload(Requisition.location),
                 joinedload(Requisition.items).joinedload(RequisitionItem.item),
             )
             .filter(Requisition.id == requisition_id)
-            .first()
         )
+        if org_id is not None:
+            query = query.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
+        return query.first()
 
     def list_all(
         self,
         status: Optional[str] = None,
         location_id: Optional[int] = None,
         requested_by: Optional[str] = None,
+        org_id: Optional[int] = None,
     ) -> List[Requisition]:
         query = self.db.query(Requisition).options(
             joinedload(Requisition.location),
             joinedload(Requisition.items).joinedload(RequisitionItem.item),
         )
 
+        if org_id is not None:
+            query = query.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
         if status:
             query = query.filter(Requisition.status == status.upper())
         if location_id:
@@ -96,32 +105,45 @@ class RequisitionRepository:
     def get_item(self, item_id: int) -> Optional[Item]:
         return self.db.query(Item).filter(Item.id == item_id).first()
 
-    def count_total(self) -> int:
-        return self.db.query(Requisition).count()
+    def count_total(self, org_id: Optional[int] = None) -> int:
+        q = self.db.query(Requisition)
+        if org_id is not None:
+            q = q.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
+        return q.count()
 
-    def count_by_status(self, status: str) -> int:
-        return self.db.query(Requisition).filter(Requisition.status == status).count()
+    def count_by_status(self, status: str, org_id: Optional[int] = None) -> int:
+        q = self.db.query(Requisition).filter(Requisition.status == status)
+        if org_id is not None:
+            q = q.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
+        return q.count()
 
-    def count_approved_today(self) -> int:
+    def count_approved_today(self, org_id: Optional[int] = None) -> int:
         today = date.today()
-        return (
-            self.db.query(Requisition)
-            .filter(
-                Requisition.status == "APPROVED",
-                func.date(Requisition.updated_at) == today,
-            )
-            .count()
+        q = self.db.query(Requisition).filter(
+            Requisition.status == "APPROVED",
+            func.date(Requisition.updated_at) == today,
         )
+        if org_id is not None:
+            q = q.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
+        return q.count()
 
-    def count_emergency_pending(self) -> int:
-        return (
-            self.db.query(Requisition)
-            .filter(
-                Requisition.status == "PENDING",
-                Requisition.urgency == "EMERGENCY",
-            )
-            .count()
+    def count_emergency_pending(self, org_id: Optional[int] = None) -> int:
+        q = self.db.query(Requisition).filter(
+            Requisition.status == "PENDING",
+            Requisition.urgency == "EMERGENCY",
         )
+        if org_id is not None:
+            q = q.join(Location, Requisition.location_id == Location.id).filter(
+                Location.org_id == org_id
+            )
+        return q.count()
+
 
     def commit(self):
         try:

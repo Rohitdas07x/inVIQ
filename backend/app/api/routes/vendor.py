@@ -83,10 +83,16 @@ def upload_delivery(
     if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
         raise ValidationError("Only .xlsx or .xls files are accepted")
 
-    # Validate location exists
-    location = db.query(Location).filter(Location.id == location_id).first()
+    # Validate location exists and belongs to the caller's organization
+    if current_user.role != "super_admin":
+        if current_user.org_id is None:
+            raise AuthorizationError("User is not assigned to an organization")
+        location = db.query(Location).filter(Location.id == location_id, Location.org_id == current_user.org_id).first()
+    else:
+        location = db.query(Location).filter(Location.id == location_id).first()
+
     if not location:
-        raise ValidationError(f"Location {location_id} not found")
+        raise AuthorizationError(f"Location {location_id} not found or does not belong to your organization")
 
     # Check vendor location access safely
     if not _has_location_access(current_user, location_id):
@@ -96,6 +102,7 @@ def upload_delivery(
     content = file.file.read()
     if len(content) > 5 * 1024 * 1024:  # 5MB max
         raise ValidationError("File size must be under 5MB")
+
 
     service = VendorService(db)
     result = service.parse_and_process_excel(
@@ -202,9 +209,13 @@ def list_invoices(
     invoice_repo = InvoiceRepository(db)
 
     # Vendors only see their own invoices
+    if current_user.role != "super_admin":
+        if current_user.org_id is None:
+            raise AuthorizationError("User is not assigned to an organization")
+
     vendor_filter = current_user.id if current_user.role == "vendor" else None
     invoices, total = invoice_repo.list_invoices(
-        org_id=current_user.org_id,
+        org_id=current_user.org_id if current_user.role != "super_admin" else None,
         vendor_user_id=vendor_filter,
         status=status,
         skip=skip,
@@ -263,6 +274,11 @@ def get_invoice_detail(
     if current_user.role == "vendor" and invoice.vendor_user_id != current_user.id:
         raise AuthorizationError("You do not have permission to view this invoice")
 
+    # Non-super_admins can only view invoices belonging to their own organization
+    if current_user.role != "super_admin":
+        if current_user.org_id is None or invoice.org_id != current_user.org_id:
+            raise AuthorizationError("Invoice does not belong to your organization")
+
     vendor_name = invoice.vendor.full_name if invoice.vendor else (invoice.vendor.username if invoice.vendor else "Vendor")
 
     return {
@@ -314,6 +330,12 @@ def download_invoice_pdf(
 
     if current_user.role == "vendor" and invoice.vendor_user_id != current_user.id:
         raise AuthorizationError("You do not have permission to download this invoice")
+
+    # Non-super_admins can only download invoices belonging to their own organization
+    if current_user.role != "super_admin":
+        if current_user.org_id is None or invoice.org_id != current_user.org_id:
+            raise AuthorizationError("Invoice does not belong to your organization")
+
 
     pdf_bytes = None
 

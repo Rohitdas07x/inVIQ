@@ -273,3 +273,4 @@ credentials/
 .DS_Store?
 Icon?
 backend/debug_import.py
+goal.md

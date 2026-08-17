@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import func
 from datetime import date
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
+
 
 from app.infrastructure.database.models import Location, Item, InventoryTransaction
 from app.core.exceptions import DatabaseError, DuplicateError
@@ -18,14 +19,23 @@ class InventoryRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_all_locations(self, limit: int = 50, offset: int = 0) -> List[Location]:
-        return self.db.query(Location).offset(offset).limit(limit).all()
+    def get_all_locations(self, limit: int = 50, offset: int = 0, org_id: Optional[int] = None) -> List[Location]:
+        q = self.db.query(Location)
+        if org_id is not None:
+            q = q.filter(Location.org_id == org_id)
+        return q.offset(offset).limit(limit).all()
 
-    def get_location_by_id(self, location_id: int) -> Optional[Location]:
-        return self.db.query(Location).filter(Location.id == location_id).first()
+    def get_location_by_id(self, location_id: int, org_id: Optional[int] = None) -> Optional[Location]:
+        q = self.db.query(Location).filter(Location.id == location_id)
+        if org_id is not None:
+            q = q.filter(Location.org_id == org_id)
+        return q.first()
 
-    def get_location_by_name(self, name: str) -> Optional[Location]:
-        return self.db.query(Location).filter(Location.name == name).first()
+    def get_location_by_name(self, name: str, org_id: Optional[int] = None) -> Optional[Location]:
+        q = self.db.query(Location).filter(Location.name == name)
+        if org_id is not None:
+            q = q.filter(Location.org_id == org_id)
+        return q.first()
 
     def create_location(self, **kwargs) -> Location:
         try:
@@ -42,20 +52,61 @@ class InventoryRepository:
             logger.error("Database error creating location: %s", str(e))
             raise DatabaseError(f"Failed to create location: {str(e)}")
 
-    def get_all_items(self, limit: int = 50, offset: int = 0) -> List[Item]:
-        return self.db.query(Item).offset(offset).limit(limit).all()
+    def update_location(self, location: Location, **kwargs) -> Location:
+        try:
+            for key, val in kwargs.items():
+                if hasattr(location, key) and val is not None:
+                    setattr(location, key, val)
+            self.db.commit()
+            self.db.refresh(location)
+            return location
+        except IntegrityError:
+            self.db.rollback()
+            raise DuplicateError("A location with this name already exists")
+        except SQLAlchemyError as e:
+            self.db.rollback()
+            logger.error("Database error updating location: %s", str(e))
+            raise DatabaseError(f"Failed to update location: {str(e)}")
 
-    def get_item_by_id(self, item_id: int) -> Optional[Item]:
-        return self.db.query(Item).filter(Item.id == item_id).first()
+    def has_location_transactions(self, location_id: int) -> bool:
+        """Check if any transaction history exists for this location."""
+        return self.db.query(InventoryTransaction).filter(InventoryTransaction.location_id == location_id).first() is not None
 
-    def get_item_by_name(self, name: str) -> Optional[Item]:
-        return self.db.query(Item).filter(Item.name == name).first()
+    def delete_location(self, location: Location) -> bool:
+        try:
+            self.db.delete(location)
+            self.db.commit()
+            return True
+        except SQLAlchemyError as e:
+            self.db.rollback()
+            logger.error("Database error deleting location: %s", str(e))
+            raise DatabaseError(f"Failed to delete location: {str(e)}")
+
+
+    def get_all_items(self, limit: int = 50, offset: int = 0, org_id: Optional[int] = None) -> List[Item]:
+        q = self.db.query(Item)
+        if org_id is not None:
+            q = q.filter(Item.org_id == org_id)
+        return q.offset(offset).limit(limit).all()
+
+    def get_item_by_id(self, item_id: int, org_id: Optional[int] = None) -> Optional[Item]:
+        q = self.db.query(Item).filter(Item.id == item_id)
+        if org_id is not None:
+            q = q.filter(Item.org_id == org_id)
+        return q.first()
+
+    def get_item_by_name(self, name: str, org_id: Optional[int] = None) -> Optional[Item]:
+        q = self.db.query(Item).filter(Item.name == name)
+        if org_id is not None:
+            q = q.filter(Item.org_id == org_id)
+        return q.first()
 
     def get_item_by_barcode(self, barcode: str, org_id: Optional[int] = None) -> Optional[Item]:
         q = self.db.query(Item).filter(Item.barcode == barcode.strip())
         if org_id is not None:
-            q = q.filter((Item.org_id == org_id) | (Item.org_id.is_(None)))
+            q = q.filter(Item.org_id == org_id)
         return q.first()
+
 
 
 
@@ -75,10 +126,50 @@ class InventoryRepository:
             logger.error("Database error creating item: %s", str(e))
             raise DatabaseError(f"Failed to create item: {str(e)}")
 
+    def update_item(self, item: Item, **kwargs) -> Item:
+        try:
+            for key, val in kwargs.items():
+                if val is not None and hasattr(item, key):
+                    setattr(item, key, val)
+            self.db.commit()
+            self.db.refresh(item)
+            return item
+        except IntegrityError:
+            self.db.rollback()
+            raise DuplicateError("Item update caused a duplicate constraint violation")
+        except SQLAlchemyError as e:
+            self.db.rollback()
+            logger.error("Database error updating item: %s", str(e))
+            raise DatabaseError(f"Failed to update item: {str(e)}")
+
+    def has_item_transactions(self, item_id: int) -> bool:
+        count = self.db.query(InventoryTransaction).filter(
+            InventoryTransaction.item_id == item_id
+        ).count()
+        return count > 0
+
+    def delete_item(self, item: Item) -> bool:
+        try:
+            self.db.delete(item)
+            self.db.commit()
+            return True
+        except SQLAlchemyError as e:
+            self.db.rollback()
+            logger.error("Database error deleting item: %s", str(e))
+            raise DatabaseError(f"Failed to delete item: {str(e)}")
+
+
     def get_previous_transaction(
-        self, location_id: int, item_id: int, before_date: date
+        self, location_id: int, item_id: int, before_date: date, lock: bool = False
     ) -> Optional[InventoryTransaction]:
-        return (
+        """Return the most recent transaction on or before before_date.
+
+        Args:
+            lock: If True, acquire a row-level UPDATE lock (SELECT ... FOR UPDATE).
+                  Must be used inside an open transaction. Prevents concurrent
+                  stock reads from racing against each other.
+        """
+        q = (
             self.db.query(InventoryTransaction)
             .filter(
                 InventoryTransaction.location_id == location_id,
@@ -86,8 +177,11 @@ class InventoryRepository:
                 InventoryTransaction.date <= before_date,
             )
             .order_by(InventoryTransaction.date.desc(), InventoryTransaction.id.desc())
-            .first()
         )
+        if lock:
+            q = q.with_for_update()
+        return q.first()
+
 
 
     def get_latest_transaction(
@@ -136,7 +230,44 @@ class InventoryRepository:
 
         return {row.item_id: row.closing_stock for row in rows}
 
+    def get_available_batches_fefo(self, location_id: int, item_id: int) -> List[Dict[str, Any]]:
+        """
+        Compute net available stock per batch (received - issued) for a given location and item.
+        Returns all batches with net available stock > 0,
+        sorted in FEFO order (earliest expiry_date first, null expiries last).
+        """
+        rows = (
+            self.db.query(
+                InventoryTransaction.batch_number,
+                InventoryTransaction.expiry_date,
+                func.sum(InventoryTransaction.received).label("total_received"),
+                func.sum(InventoryTransaction.issued).label("total_issued"),
+            )
+            .filter(
+                InventoryTransaction.location_id == location_id,
+                InventoryTransaction.item_id == item_id,
+                InventoryTransaction.batch_number.isnot(None),
+            )
+            .group_by(InventoryTransaction.batch_number, InventoryTransaction.expiry_date)
+            .all()
+        )
+
+        available_batches = []
+        for r in rows:
+            net_qty = (r.total_received or 0) - (r.total_issued or 0)
+            if net_qty > 0:
+                available_batches.append({
+                    "batch_number": r.batch_number,
+                    "expiry_date": r.expiry_date,
+                    "available_qty": net_qty,
+                })
+
+        # Sort FEFO: earliest expiry first, nulls at the end
+        available_batches.sort(key=lambda b: (b["expiry_date"] is None, b["expiry_date"]))
+        return available_batches
+
     def create_transaction(self, flush_only: bool = False, **kwargs) -> InventoryTransaction:
+
         """
         Create an inventory transaction.
 
@@ -168,9 +299,17 @@ class InventoryRepository:
     def count_locations(self) -> int:
         return self.db.query(Location).count()
 
-    def delete_all_transactions(self) -> int:
+    def delete_all_transactions(self, org_id: Optional[int] = None) -> int:
+        """Delete inventory transactions. If org_id is given, only that org's data is deleted."""
         try:
-            count = self.db.query(InventoryTransaction).delete()
+            q = self.db.query(InventoryTransaction)
+            if org_id is not None:
+                q = q.filter(
+                    InventoryTransaction.location_id.in_(
+                        self.db.query(Location.id).filter(Location.org_id == org_id)
+                    )
+                )
+            count = q.delete(synchronize_session=False)
             self.db.commit()
             return count
         except SQLAlchemyError as e:
@@ -178,9 +317,13 @@ class InventoryRepository:
             logger.error("Database error deleting transactions: %s", str(e))
             raise DatabaseError(f"Failed to delete transactions: {str(e)}")
 
-    def delete_all_items(self) -> int:
+    def delete_all_items(self, org_id: Optional[int] = None) -> int:
+        """Delete items. If org_id is given, only that org's items are deleted."""
         try:
-            count = self.db.query(Item).delete()
+            q = self.db.query(Item)
+            if org_id is not None:
+                q = q.filter(Item.org_id == org_id)
+            count = q.delete(synchronize_session=False)
             self.db.commit()
             return count
         except SQLAlchemyError as e:
@@ -188,9 +331,13 @@ class InventoryRepository:
             logger.error("Database error deleting items: %s", str(e))
             raise DatabaseError(f"Failed to delete items: {str(e)}")
 
-    def delete_all_locations(self) -> int:
+    def delete_all_locations(self, org_id: Optional[int] = None) -> int:
+        """Delete locations. If org_id is given, only that org's locations are deleted."""
         try:
-            count = self.db.query(Location).delete()
+            q = self.db.query(Location)
+            if org_id is not None:
+                q = q.filter(Location.org_id == org_id)
+            count = q.delete(synchronize_session=False)
             self.db.commit()
             return count
         except SQLAlchemyError as e:

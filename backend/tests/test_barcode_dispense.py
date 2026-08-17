@@ -25,8 +25,10 @@ class TestBarcodeDispense:
     """Test the POST /api/inventory/scan-dispense endpoint and service."""
 
     def test_scan_dispense_success(self, client, test_user, db):
-        location = Location(name="Dispense Counter 1", type="counter", region="North")
+        org_id = test_user["user"].org_id
+        location = Location(org_id=org_id, name="Dispense Counter 1", type="counter", region="North")
         item = Item(
+            org_id=org_id,
             name="Pan-D Capsule Test",
             barcode="890108699999",
             category="Gastro & PPI",
@@ -74,8 +76,10 @@ class TestBarcodeDispense:
         assert data["data"]["batch_number"] == "BT-TEST-001"
 
     def test_scan_dispense_by_numeric_id(self, client, test_user, db):
-        location = Location(name="Dispense Counter 2", type="counter", region="South")
+        org_id = test_user["user"].org_id
+        location = Location(org_id=org_id, name="Dispense Counter 2", type="counter", region="South")
         item = Item(
+            org_id=org_id,
             name="Dolo 650 Test",
             barcode="890108688888",
             category="Analgesics & Pain",
@@ -119,8 +123,10 @@ class TestBarcodeDispense:
         assert data["data"]["remaining_stock"] == 19
 
     def test_scan_dispense_insufficient_stock(self, client, test_user, db):
-        location = Location(name="Dispense Counter 3", type="counter", region="East")
+        org_id = test_user["user"].org_id
+        location = Location(org_id=org_id, name="Dispense Counter 3", type="counter", region="East")
         item = Item(
+            org_id=org_id,
             name="Augmentin Test",
             barcode="890108677777",
             category="Antibiotics",
@@ -132,6 +138,7 @@ class TestBarcodeDispense:
         db.commit()
         db.refresh(location)
         db.refresh(item)
+
 
         tx_in = InventoryTransaction(
             location_id=location.id,

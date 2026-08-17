@@ -90,8 +90,8 @@ class TestLogin:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "access_token" in data["data"]
-        assert "refresh_token" in data["data"]
+        assert "user" in data["data"]
+        assert "access_token" in response.cookies or any("access_token=" in h for h in response.headers.get_list("set-cookie"))
 
     def test_login_wrong_password(self, client, test_user):
         response = client.post("/api/auth/login", json={
@@ -163,3 +163,145 @@ class TestRBAC:
         headers = get_auth_header(client, admin_user["username"], admin_user["password"])
         response = client.get("/api/auth/users", headers=headers)
         assert response.status_code == 200
+
+
+class TestTenantIsolationAndIDOR:
+    """Multi-tenant security barrier and IDOR prevention tests."""
+
+    def test_admin_cannot_access_other_tenant_user_detail(self, client, admin_user, db):
+        from app.infrastructure.database.models import User
+        from app.core.security import hash_password
+
+        # Create a user in a different organization (org_id=99)
+        other_user = User(
+            email="other_tenant@example.com",
+            username="other_tenant_user",
+            hashed_password=hash_password("Pass123!"),
+            role="staff",
+            org_id=99,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+        db.refresh(other_user)
+
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        # Admin in org_id=1 attempts to GET user from org_id=99
+        res = client.get(f"/api/auth/users/{other_user.id}", headers=admin_headers)
+        assert res.status_code == 403
+        data = res.json()
+        error_msg = data.get("error", {}).get("message", "") or data.get("detail", "")
+        assert "Cross-tenant" in error_msg or "permission" in error_msg.lower()
+
+    def test_admin_cannot_modify_other_tenant_user_role(self, client, admin_user, db):
+        from app.infrastructure.database.models import User
+        from app.core.security import hash_password
+
+        other_user = User(
+            email="victim@otherorg.com",
+            username="victim_user",
+            hashed_password=hash_password("Pass123!"),
+            role="staff",
+            org_id=88,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+        db.refresh(other_user)
+
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        # Attempt to escalate victim to admin
+        res = client.put(
+            f"/api/auth/users/{other_user.id}/role",
+            json={"role": "admin"},
+            headers=admin_headers,
+        )
+        assert res.status_code == 403
+
+    def test_admin_cannot_reset_other_tenant_password(self, client, admin_user, db):
+        from app.infrastructure.database.models import User
+        from app.core.security import hash_password
+
+        other_user = User(
+            email="victim_pass@otherorg.com",
+            username="victim_pass_user",
+            hashed_password=hash_password("Pass123!"),
+            role="staff",
+            org_id=77,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+        db.refresh(other_user)
+
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        # Attempt takeover via password reset
+        res = client.post(
+            f"/api/auth/users/{other_user.id}/reset-password",
+            json={"new_password": "HackedPassword123!"},
+            headers=admin_headers,
+        )
+        assert res.status_code == 403
+
+    def test_admin_cannot_assign_super_admin_role(self, client, admin_user, test_user, db):
+        from app.infrastructure.database.models import User
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        user_obj = db.query(User).filter(User.username == test_user["username"]).first()
+        user_id = user_obj.id
+
+        res = client.put(
+            f"/api/auth/users/{user_id}/role",
+            json={"role": "super_admin"},
+            headers=admin_headers,
+        )
+        assert res.status_code in [403, 422]
+
+
+class TestCookieAuthAndCSP:
+    """Tests for secure HttpOnly cookie session management and CSP security headers."""
+
+    def test_login_sets_httponly_samesite_cookies(self, client, test_user):
+        res = client.post(
+            "/api/auth/login",
+            json={"email": "test@example.com", "password": test_user["password"]},
+        )
+        assert res.status_code == 200
+        set_cookies = res.headers.get_list("set-cookie")
+        assert any("access_token=" in h for h in set_cookies) or "access_token" in res.cookies
+        assert any("refresh_token=" in h for h in set_cookies) or "refresh_token" in res.cookies
+
+
+
+    def test_authenticated_via_cookie_without_auth_header(self, client, test_user):
+        login_res = client.post(
+            "/api/auth/login",
+            json={"email": "test@example.com", "password": test_user["password"]},
+        )
+        assert login_res.status_code == 200
+        token = login_res.cookies.get("access_token")
+
+        # Request /auth/me passing access_token cookie without Authorization header
+        me_res = client.get("/api/auth/me", cookies={"access_token": token})
+        assert me_res.status_code == 200
+        assert me_res.json()["data"]["username"] == test_user["username"]
+
+
+    def test_security_headers_and_csp_present(self, client):
+        res = client.get("/health")
+        assert res.status_code == 200
+        assert "Content-Security-Policy" in res.headers
+        assert "X-Frame-Options" in res.headers
+        assert "X-Content-Type-Options" in res.headers
+        assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+
+
+
+

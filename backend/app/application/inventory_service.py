@@ -19,46 +19,45 @@ logger = logging.getLogger("smart_inventory.service.inventory")
 
 
 class InventoryService:
-    # Thread-safe class-level cache for admin/manager email lists to avoid DB queries in loops
-    _recipients_cache: list[str] = []
-    _recipients_cache_expiry: float = 0.0
+    # Thread-safe class-level cache for admin/manager email lists per organization to avoid DB queries in loops
+    _recipients_cache: Dict[Optional[int], list[str]] = {}
+    _recipients_cache_expiry: Dict[Optional[int], float] = {}
     _recipients_cache_lock = threading.Lock()
 
     def __init__(self, repo: InventoryRepository):
         self.repo = repo
 
-    def _get_recipient_emails(self) -> list[str]:
-        """Fetch emails of active admins/managers, cached for 60 seconds to avoid querying in loops."""
+    def _get_recipient_emails(self, org_id: Optional[int] = None) -> list[str]:
+        """Fetch emails of active admins/managers for the organization, cached for 60 seconds."""
         now = time.time()
         # Fast path without lock
-        if now < InventoryService._recipients_cache_expiry:
-            return list(InventoryService._recipients_cache)
+        if org_id in InventoryService._recipients_cache and now < InventoryService._recipients_cache_expiry.get(org_id, 0.0):
+            return list(InventoryService._recipients_cache[org_id])
 
         with InventoryService._recipients_cache_lock:
             # Double check under lock
-            if now < InventoryService._recipients_cache_expiry:
-                return list(InventoryService._recipients_cache)
+            if org_id in InventoryService._recipients_cache and now < InventoryService._recipients_cache_expiry.get(org_id, 0.0):
+                return list(InventoryService._recipients_cache[org_id])
 
             try:
                 from app.infrastructure.database.models import User
-                recipients = [
-                    u.email
-                    for u in self.repo.db.query(User)
-                    .filter(
-                        User.role.in_(["admin", "super_admin"]),
-                        User.is_active.is_(True),
-                        User.email.isnot(None),
-                    )
+                query = self.repo.db.query(User).filter(
+                    User.role.in_(["admin", "super_admin"]),
+                    User.is_active.is_(True),
+                    User.email.isnot(None),
+                )
+                if org_id is not None:
+                    query = query.filter(User.org_id == org_id)
 
-                    .all()
-                ]
-                InventoryService._recipients_cache = recipients
-                InventoryService._recipients_cache_expiry = now + 60.0  # cache for 60 seconds
+                recipients = [u.email for u in query.all()]
+                InventoryService._recipients_cache[org_id] = recipients
+                InventoryService._recipients_cache_expiry[org_id] = now + 60.0  # cache for 60 seconds
                 return list(recipients)
             except Exception as e:
                 logger.error("Failed to query user recipient emails: %s", e)
                 # Return cached value even if stale as fallback
-                return list(InventoryService._recipients_cache)
+                return list(InventoryService._recipients_cache.get(org_id, []))
+
 
     def add_transaction(
         self,
@@ -75,7 +74,7 @@ class InventoryService:
     ) -> Dict[str, Any]:
         try:
             previous = self.repo.get_previous_transaction(
-                location_id, item_id, transaction_date
+                location_id, item_id, transaction_date, lock=True
             )
 
             if previous:
@@ -115,17 +114,21 @@ class InventoryService:
                     alert_status, item.name, location_id, closing_stock, item.min_stock,
                 )
 
-                # Queue alert for real-time WebSocket broadcast safely
+                # Queue alert for real-time WebSocket broadcast safely (org-scoped)
                 from app.api.routes.websocket import queue_websocket_alert
-                queue_websocket_alert({
-                    "type": "low_stock_alert",
-                    "status": alert_status,
-                    "item_name": item.name,
-                    "item_id": item_id,
-                    "location_id": location_id,
-                    "current_stock": closing_stock,
-                    "min_stock": item.min_stock,
-                })
+                queue_websocket_alert(
+                    {
+                        "type": "low_stock_alert",
+                        "status": alert_status,
+                        "item_name": item.name,
+                        "item_id": item_id,
+                        "location_id": location_id,
+                        "current_stock": closing_stock,
+                        "min_stock": item.min_stock,
+                    },
+                    org_id=item.org_id,
+                )
+
 
                 # ── Email alert to admins & managers ───────────────────
                 # Resolve location name and recipient emails, then
@@ -135,8 +138,9 @@ class InventoryService:
                     from threading import Thread
                     from app.application.notification_service import NotificationService
 
-                    # Fetch email addresses using cached helper
-                    recipient_emails = self._get_recipient_emails()
+                    # Fetch email addresses using cached helper scoped to the item's organization
+                    recipient_emails = self._get_recipient_emails(org_id=item.org_id)
+
 
                     # Resolve location name for the email body
                     location = self.repo.get_location_by_id(location_id)
@@ -238,14 +242,15 @@ class InventoryService:
         latest = self.repo.get_latest_transaction(location_id, item_id)
         return latest.closing_stock if latest else None
 
-    def get_location_items(self, location_id: int) -> list:
+    def get_location_items(self, location_id: int, org_id: Optional[int] = None) -> list:
         """
-        Return stock status for every item at the given location.
+        Return stock status for every item at the given location scoped to org_id.
 
         Uses a single batch query (get_latest_stocks_for_location) instead of
         N+1 individual queries — critical for performance over remote DB connections.
         """
-        items = self.repo.get_all_items()
+        items = self.repo.get_all_items(org_id=org_id)
+
 
         # Single query: {item_id: closing_stock} for all items at this location
         stock_map = self.repo.get_latest_stocks_for_location(location_id)
@@ -306,71 +311,105 @@ class InventoryService:
         if not item:
             raise ValidationError(f"Medicine not found for barcode/ID: '{barcode_or_id}'")
 
-        # 2. Check current stock level at this pharmacy location
-        current_stock = self.get_latest_stock(location_id, item.id) or 0
-        if current_stock < quantity:
-            raise InsufficientStockError(
-                f"Insufficient stock for {item.name}: only {current_stock} {item.unit} available at this counter (requested {quantity})"
-            )
+        from app.infrastructure.cache.redis_lock import redis_distributed_lock
 
-        # 3. Find earliest-expiring batch (FEFO Order)
-        from app.infrastructure.database.models import InventoryTransaction
-        fefo_tx = (
-            self.repo.db.query(InventoryTransaction)
-            .filter(
-                InventoryTransaction.location_id == location_id,
-                InventoryTransaction.item_id == item.id,
-                InventoryTransaction.batch_number.isnot(None),
-            )
-            .order_by(InventoryTransaction.expiry_date.asc().nullslast(), InventoryTransaction.id.desc())
-            .first()
-        )
+        with redis_distributed_lock(f"stock:{location_id}:{item.id}", org_id=org_id):
+            # 2. Check current stock level at this pharmacy location
+            current_stock = self.get_latest_stock(location_id, item.id) or 0
+            if current_stock < quantity:
+                raise InsufficientStockError(
+                    f"Insufficient stock for {item.name}: only {current_stock} {item.unit} available at this counter (requested {quantity})"
+                )
 
-        batch_number = fefo_tx.batch_number if fefo_tx else f"BT-SCAN-{int(time.time()) % 10000}"
-        expiry_date = fefo_tx.expiry_date if fefo_tx else date.today()
+            # 3. Find active batches with positive available stock (FEFO Order)
+            available_batches = self.repo.get_available_batches_fefo(location_id, item.id)
 
-        # 4. Perform atomic stock issue
-        tx_result = self.add_transaction(
-            location_id=location_id,
-            item_id=item.id,
-            transaction_date=date.today(),
-            received=0,
-            issued=quantity,
-            notes=f"Quick Barcode Dispense [Code: {item.barcode or barcode_or_id}]",
-            entered_by=entered_by,
-            batch_number=batch_number,
-            expiry_date=expiry_date,
-        )
+            remaining_to_dispense = quantity
+            allocated_batches = []
+            last_tx_result = None
 
-        # 5. Targeted cache invalidation for real-time reactivity
-        try:
-            from app.application.cache_service import cache_invalidate_pattern
-            cache_invalidate_pattern(f"ref:location_items:{location_id}")
-            cache_invalidate_pattern(f"analytics:alerts:*")
-        except Exception as e:
-            logger.debug("Cache invalidation skipped: %s", e)
+            if available_batches:
+                for b in available_batches:
+                    if remaining_to_dispense <= 0:
+                        break
+                    deduct = min(remaining_to_dispense, b["available_qty"])
+                    tx_res = self.add_transaction(
+                        location_id=location_id,
+                        item_id=item.id,
+                        transaction_date=date.today(),
+                        received=0,
+                        issued=deduct,
+                        notes=f"FEFO Barcode Dispense [Batch: {b['batch_number']}, Code: {item.barcode or barcode_or_id}]",
+                        entered_by=entered_by,
+                        batch_number=b["batch_number"],
+                        expiry_date=b["expiry_date"],
+                    )
+                    allocated_batches.append({
+                        "batch_number": b["batch_number"],
+                        "expiry_date": str(b["expiry_date"]) if b["expiry_date"] else None,
+                        "quantity": deduct,
+                        "transaction_id": tx_res["data"]["id"],
+                    })
+                    remaining_to_dispense -= deduct
+                    last_tx_result = tx_res
+
+            # If any remaining quantity (e.g. unbatched opening stock), issue the remainder
+            if remaining_to_dispense > 0:
+                fb_batch = f"BT-SCAN-{int(time.time()) % 10000}"
+                fb_expiry = date.today()
+                tx_res = self.add_transaction(
+                    location_id=location_id,
+                    item_id=item.id,
+                    transaction_date=date.today(),
+                    received=0,
+                    issued=remaining_to_dispense,
+                    notes=f"FEFO Barcode Dispense [Unbatched Stock, Code: {item.barcode or barcode_or_id}]",
+                    entered_by=entered_by,
+                    batch_number=fb_batch,
+                    expiry_date=fb_expiry,
+                )
+                allocated_batches.append({
+                    "batch_number": fb_batch,
+                    "expiry_date": str(fb_expiry),
+                    "quantity": remaining_to_dispense,
+                    "transaction_id": tx_res["data"]["id"],
+                })
+                last_tx_result = tx_res
+
+            # 5. Targeted cache invalidation for real-time reactivity
+            try:
+                from app.application.cache_service import cache_invalidate_pattern
+                cache_invalidate_pattern(f"ref:location_items:{location_id}")
+                cache_invalidate_pattern(f"analytics:alerts:*")
+            except Exception as e:
+                logger.debug("Cache invalidation skipped: %s", e)
+
+            remaining_stock = last_tx_result["data"]["closing_stock"] if last_tx_result else current_stock - quantity
+            status = "CRITICAL" if remaining_stock <= 0 else ("WARNING" if remaining_stock <= item.min_stock else "HEALTHY")
+
+            primary_batch = allocated_batches[0]["batch_number"] if allocated_batches else f"BT-SCAN-{int(time.time()) % 10000}"
+            primary_expiry = allocated_batches[0]["expiry_date"] if allocated_batches else str(date.today())
+
+            return {
+                "success": True,
+                "message": f"Dispensed {quantity} {item.unit} of {item.name}",
+                "data": {
+                    "item_id": item.id,
+                    "item_name": item.name,
+                    "category": item.category,
+                    "barcode": item.barcode,
+                    "mrp": getattr(item, "mrp", 0.0),
+                    "batch_number": primary_batch,
+                    "expiry_date": primary_expiry,
+                    "allocated_batches": allocated_batches,
+                    "dispensed_quantity": quantity,
+                    "remaining_stock": remaining_stock,
+                    "status": status,
+                    "transaction_id": last_tx_result["data"]["id"] if last_tx_result else None,
+                },
+            }
 
 
-        remaining_stock = tx_result["data"]["closing_stock"]
-        status = "CRITICAL" if remaining_stock <= 0 else ("WARNING" if remaining_stock <= item.min_stock else "HEALTHY")
-
-        return {
-            "success": True,
-            "message": f"Dispensed {quantity} {item.unit} of {item.name}",
-            "data": {
-                "item_id": item.id,
-                "item_name": item.name,
-                "category": item.category,
-                "barcode": item.barcode,
-                "mrp": getattr(item, "mrp", 0.0),
-                "batch_number": batch_number,
-                "expiry_date": str(expiry_date) if expiry_date else None,
-                "dispensed_quantity": quantity,
-                "remaining_stock": remaining_stock,
-                "status": status,
-                "transaction_id": tx_result["data"]["id"],
-            },
-        }
 
     @staticmethod
     def add_transaction_static(db, **kwargs) -> Dict[str, Any]:

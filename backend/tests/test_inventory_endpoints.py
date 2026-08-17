@@ -177,8 +177,8 @@ class TestInventoryTransactions:
         """Add transaction with minimal fields (no batch info)."""
         from app.infrastructure.database.models import Location, Item
 
-        location = Location(name="TX Location Minimal", type="clinic", region="Test")
-        item = Item(name="TX Item Minimal", category="medicine", unit="box",
+        location = Location(org_id=1, name="TX Location Minimal", type="clinic", region="Test")
+        item = Item(org_id=1, name="TX Item Minimal", category="medicine", unit="box",
                     lead_time_days=7, min_stock=50, storage_temp="ambient")
         db.add(location)
         db.add(item)
@@ -206,8 +206,8 @@ class TestInventoryTransactions:
         """Add inbound transaction with batch_number and expiry_date."""
         from app.infrastructure.database.models import Location, Item
 
-        location = Location(name="Cold Chain Location", type="central_warehouse", region="Delhi")
-        item = Item(name="BCG Vaccine Batch Test", category="Vaccines", unit="vial",
+        location = Location(org_id=1, name="Cold Chain Location", type="central_warehouse", region="Delhi")
+        item = Item(org_id=1, name="BCG Vaccine Batch Test", category="Vaccines", unit="vial",
                     lead_time_days=14, min_stock=200, storage_temp="cold_chain")
         db.add(location)
         db.add(item)
@@ -254,8 +254,8 @@ class TestInventoryTransactions:
         """GET /inventory/stock/{location_id}/{item_id} returns latest stock."""
         from app.infrastructure.database.models import Location, Item, InventoryTransaction
 
-        location = Location(name="Stock Location", type="warehouse", region="Test")
-        item = Item(name="Stock Item", category="supplies", unit="pack",
+        location = Location(org_id=1, name="Stock Location", type="warehouse", region="Test")
+        item = Item(org_id=1, name="Stock Item", category="supplies", unit="pack",
                     lead_time_days=5, min_stock=20, storage_temp="ambient")
         db.add(location)
         db.add(item)
@@ -290,10 +290,10 @@ class TestInventoryTransactions:
         """Bulk transaction with pharmacy batch info on inbound deliveries."""
         from app.infrastructure.database.models import Location, Item
 
-        location = Location(name="Bulk Pharma Location", type="central_warehouse", region="Test")
-        item1 = Item(name="Bulk Vaccine 1", category="Vaccines", unit="vial",
+        location = Location(org_id=1, name="Bulk Pharma Location", type="central_warehouse", region="Test")
+        item1 = Item(org_id=1, name="Bulk Vaccine 1", category="Vaccines", unit="vial",
                      lead_time_days=14, min_stock=200, storage_temp="cold_chain")
-        item2 = Item(name="Bulk Antibiotic 1", category="Antibiotics", unit="box",
+        item2 = Item(org_id=1, name="Bulk Antibiotic 1", category="Antibiotics", unit="box",
                      lead_time_days=7, min_stock=100, storage_temp="ambient")
         db.add_all([location, item1, item2])
         db.commit()
@@ -335,8 +335,8 @@ class TestInventoryTransactions:
         """Outbound-only transaction (issued only, no batch info) is valid."""
         from app.infrastructure.database.models import Location, Item, InventoryTransaction
 
-        location = Location(name="Outbound Location", type="retail_pharmacy", region="Mumbai")
-        item = Item(name="Outbound Drug", category="Antibiotics", unit="box",
+        location = Location(org_id=1, name="Outbound Location", type="retail_pharmacy", region="Mumbai")
+        item = Item(org_id=1, name="Outbound Drug", category="Antibiotics", unit="box",
                     lead_time_days=7, min_stock=50, storage_temp="ambient")
         db.add_all([location, item])
         db.commit()

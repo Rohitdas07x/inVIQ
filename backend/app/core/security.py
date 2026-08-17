@@ -39,7 +39,8 @@ DUMMY_HASH = password_hash.hash("dummypassword_not_used_ever")
 # ── OAuth2 scheme — enables Swagger /docs "Authorize" button ──────────────
 # Even though we use JSON login (not form data), declaring this makes
 # the OpenAPI spec expose the Bearer token flow correctly.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
 
 
 # ── Password utilities ────────────────────────────────────────────────────
@@ -56,6 +57,25 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Always runs in constant time — safe against timing attacks.
     """
     return password_hash.verify(plain_password, hashed_password)
+
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """
+    Validate that a password meets enterprise complexity requirements:
+    - At least 8 characters
+    - Contains uppercase and lowercase letters
+    - Contains at least one numeric digit
+    """
+    if not password or len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter"
+    if not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter"
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one digit"
+    return True, ""
+
 
 
 def authenticate_user(user, plain_password: str) -> bool:

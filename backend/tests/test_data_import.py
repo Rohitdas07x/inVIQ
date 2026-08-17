@@ -61,10 +61,15 @@ def test_confirm_import_and_quarantine(client, test_user, db):
     # Create location
     loc = db.query(Location).filter(Location.name == "Import Test Clinic").first()
     if not loc:
-        loc = Location(name="Import Test Clinic", type="clinic", region="North")
+        loc = Location(name="Import Test Clinic", type="clinic", region="North", org_id=1)
         db.add(loc)
         db.commit()
         db.refresh(loc)
+    elif loc.org_id != 1:
+        loc.org_id = 1
+        db.commit()
+        db.refresh(loc)
+
 
     # Valid row + invalid quantity row
     csv_content = (

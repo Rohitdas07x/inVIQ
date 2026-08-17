@@ -19,9 +19,9 @@ from app.core.exceptions import AppException
 
 class AnalyticsService:
     @staticmethod
-    def get_heatmap(db: Session) -> Dict[str, Any]:
+    def get_heatmap(db: Session, org_id: Optional[int] = None) -> Dict[str, Any]:
         try:
-            data = get_heatmap_data(db)
+            data = get_heatmap_data(db, org_id=org_id)
 
             formatted_details = [format_stock_item(item) for item in data["details"]]
 
@@ -38,9 +38,9 @@ class AnalyticsService:
             raise AppException(f"Failed to generate heatmap: {str(e)}")
 
     @staticmethod
-    def get_alerts(db: Session, severity: str = "CRITICAL") -> Dict[str, Any]:
+    def get_alerts(db: Session, severity: str = "CRITICAL", org_id: Optional[int] = None) -> Dict[str, Any]:
         try:
-            alerts = get_critical_alerts(db, severity)
+            alerts = get_critical_alerts(db, severity, org_id=org_id)
 
             formatted_alerts = []
             for alert in alerts:
@@ -67,9 +67,9 @@ class AnalyticsService:
             raise AppException(f"Failed to fetch alerts: {str(e)}")
 
     @staticmethod
-    def get_summary(db: Session) -> Dict[str, Any]:
+    def get_summary(db: Session, org_id: Optional[int] = None) -> Dict[str, Any]:
         try:
-            stock_health = get_latest_stock_health(db)
+            stock_health = get_latest_stock_health(db, org_id=org_id)
 
             critical_count = sum(
                 1 for item in stock_health if item.health_status == "CRITICAL"

@@ -38,6 +38,12 @@ class Organization(Base):
     name = Column(String(200), unique=True, nullable=False)
     slug = Column(String(100), unique=True, nullable=False, index=True)
     plan = Column(_OrgPlanEnum, nullable=False, default="single_pharmacy")
+    address = Column(Text, nullable=True)
+    phone = Column(String(50), nullable=True)
+    email = Column(String(255), nullable=True)
+    gstin = Column(String(50), nullable=True)
+    dl_number = Column(String(100), nullable=True)  # Drug License Number
+    settings = Column(JSON, default=dict)
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -82,22 +88,25 @@ class Location(Base):
     __tablename__ = "locations"
     __table_args__ = (
         Index("ix_locations_org_type", "org_id", "type"),
+        Index("ix_locations_org_active", "org_id", "is_active"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False, index=True)
-    type = Column(String(50), nullable=False, index=True)  # retail_counter | cold_storage | branch
+    type = Column(String(50), nullable=False, index=True)  # retail_counter | cold_storage | branch | warehouse
     region = Column(String(100), nullable=False, index=True)
     radius_meters = Column(Integer, default=500)  # Counter delivery / geofence radius
     pincode = Column(String(20), nullable=True)
     phone = Column(String(30), nullable=True)
     address = Column(Text)
+    is_active = Column(Boolean, default=True, index=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     organization = relationship("Organization", back_populates="locations")
     transactions = relationship("InventoryTransaction", back_populates="location")
+
 
 
 class Item(Base):

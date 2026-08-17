@@ -94,3 +94,59 @@ class TestAdminReports:
         assert response.status_code in [200, 500]
         if response.status_code == 200:
             assert response.headers["content-type"] == "application/pdf"
+
+
+class TestAdminTenantScoping:
+    """Verify admin overview, audit logs, and users summary do not leak cross-tenant data."""
+
+    def test_admin_overview_scoped_to_own_org(self, client, admin_user, db):
+        from app.infrastructure.database.models import User
+        from app.core.security import hash_password
+
+        # Create a user in a different organization (org_id=99)
+        other_user = User(
+            email="other_tenant_admin@example.com",
+            username="other_tenant_admin",
+            hashed_password=hash_password("Pass123!"),
+            role="staff",
+            org_id=99,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        # Fetch overview for org_id=1
+        res = client.get("/api/admin/overview", headers=admin_headers)
+        assert res.status_code == 200
+        data = res.json()["data"]
+
+        # Ensure recent signups in org_id=1 do NOT contain user from org_id=99
+        recent_usernames = [u["username"] for u in data["recent_signups"]]
+        assert "other_tenant_admin" not in recent_usernames
+
+    def test_users_summary_scoped_to_own_org(self, client, admin_user, db):
+        from app.infrastructure.database.models import User
+        from app.core.security import hash_password
+
+        other_user = User(
+            email="leak_test_user@example.com",
+            username="leak_test_user",
+            hashed_password=hash_password("Pass123!"),
+            role="staff",
+            org_id=88,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(other_user)
+        db.commit()
+
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        res = client.get("/api/admin/users/summary", headers=admin_headers)
+        assert res.status_code == 200
+        all_usernames = [u["username"] for u in res.json()["data"]["all_users"]]
+        assert "leak_test_user" not in all_usernames
+

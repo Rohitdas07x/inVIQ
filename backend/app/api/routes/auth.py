@@ -2,9 +2,12 @@ import logging
 import os
 import httpx
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+
+
 
 from app.core.dependencies import (
     get_user_repo,
@@ -23,15 +26,24 @@ from app.core.security import (
     hash_password,
     mask_email,
 )
-from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError, DuplicateError
+from app.core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ValidationError,
+    NotFoundError,
+    DuplicateError,
+)
+
 from app.infrastructure.database.user_repo import UserRepository
-from app.infrastructure.database.models import User
+from app.infrastructure.database.models import User, Location
 from app.application.audit_service import AuditService
 from app.application.notification_service import NotificationService
 from app.api.schemas.auth_schemas import (
     UserCreate,
+    UserUpdate,
     UserResponse,
     UserProfileUpdate,
+
     AdminPasswordReset,
     LoginRequest,
     Token,
@@ -75,14 +87,20 @@ def _generate_verification_token(user_id: int, email: str) -> str:
 
 
 def _generate_password_reset_token(user_id: int, email: str) -> str:
-    """Generate a signed token for password reset."""
+    """Generate a signed, single-use token for password reset."""
+    import uuid
+    from app.infrastructure.cache.token_blacklist import register_reset_jti
+    jti = str(uuid.uuid4())
     payload = {
         "sub": str(user_id),
         "email": email,
         "type": "password_reset",
+        "jti": jti,
         "exp": datetime.now(timezone.utc) + timedelta(hours=1),
     }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    register_reset_jti(jti, ttl_seconds=3600)
+    return token
 
 
 def _send_email(to_email: str, subject: str, html_content: str) -> bool:
@@ -212,6 +230,20 @@ def register(
     # Allocate new staff / vendor strictly to the current admin's pharmacy organization
     target_org_id = current_user.org_id
 
+    # Validate location_ids against the target organization
+    loc_ids = request_body.location_ids or []
+    if loc_ids and current_user.role != "super_admin":
+        if target_org_id is None:
+            raise AuthorizationError("User is not assigned to an organization")
+        valid_locs = db.db.query(Location.id).filter(
+            Location.id.in_(loc_ids),
+            Location.org_id == target_org_id,
+        ).all()
+        valid_set = {loc[0] for loc in valid_locs}
+        invalid_ids = [lid for lid in loc_ids if lid not in valid_set]
+        if invalid_ids:
+            raise ValidationError(f"Invalid location ID(s): {invalid_ids}. Locations must belong to your organization.")
+
     user = db.create(
         email=request_body.email,
         username=request_body.username,
@@ -219,8 +251,9 @@ def register(
         full_name=request_body.full_name,
         role=request_body.role,
         org_id=target_org_id,
-        location_ids=request_body.location_ids or [],
+        location_ids=loc_ids,
     )
+
 
 
     # Send welcome email with credentials
@@ -358,17 +391,48 @@ def signup(
     }
 
 
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    """Set secure, HttpOnly, SameSite cookies for robust browser authentication."""
+    is_prod = settings.ENVIRONMENT == "production"
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        path="/",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Clear HttpOnly authentication cookies on logout."""
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/")
+
+
 # ── POST /login ────────────────────────────────────────────────────────────
 
 
 
-@router.post("/login", response_model=dict)
+@router.post("/login")
 @limiter.limit(settings.RATE_LIMIT_AUTH)
 def login(
     request_body: LoginRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_user_repo),
 ):
+
     # Strictly lookup ONLY by email address (case-insensitive)
     login_email = str(request_body.email).strip().lower()
     user = db.get_by_email(login_email)
@@ -446,37 +510,45 @@ def login(
         ip_address=_get_client_ip(request),
     )
 
-    return {
-        "success": True,
-        "message": "Login successful",
-        "data": {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "user": _user_dict(user),
-        },
-    }
+    json_resp = JSONResponse(
+        content={
+            "success": True,
+            "message": "Login successful",
+            "data": {
+                "token_type": "bearer",
+                "user": _user_dict(user),
+            },
+        }
+    )
+    _set_auth_cookies(json_resp, access_token, refresh_token)
+    return json_resp
 
 
 # ── POST /logout ───────────────────────────────────────────────────────────
 
 
-@router.post("/logout", response_model=dict)
+@router.post("/logout")
 def logout(
     request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
-    """Blacklist the current access token (and optionally refresh token)."""
+    """Blacklist the current access token and clear authentication cookies."""
     from app.infrastructure.cache.token_blacklist import (
         blacklist_token,
         blacklist_refresh_token,
     )
 
-    # Extract the access token from the Authorization header
+    # Extract the access token from the Authorization header or cookie
+    access_token = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         access_token = auth_header[7:]
+    elif request.cookies.get("access_token"):
+        access_token = request.cookies.get("access_token")
+
+    if access_token:
         blacklist_token(access_token)
 
     # Audit log — reuse the injected db session, no extra connection
@@ -493,19 +565,23 @@ def logout(
     except Exception:
         pass
 
-    return {"success": True, "message": "Logged out successfully"}
+    json_resp = JSONResponse(content={"success": True, "message": "Logged out successfully"})
+    _clear_auth_cookies(json_resp)
+    return json_resp
 
 
 # ── POST /refresh ──────────────────────────────────────────────────────────
 
 
-@router.post("/refresh", response_model=dict)
+@router.post("/refresh")
 @limiter.limit("10/minute")
 def refresh_token(
     request: Request,
-    body_data: RefreshTokenRequest,
+    response: Response,
+    body_data: Optional[RefreshTokenRequest] = None,
     db: Session = Depends(get_user_repo),
 ):
+
     """
     Refresh access token. Implements token rotation:
     the old refresh token is blacklisted after use (one-time use only).
@@ -515,7 +591,7 @@ def refresh_token(
         is_token_blacklisted,
     )
 
-    refresh_token_str = body_data.refresh_token
+    refresh_token_str = (body_data.refresh_token if body_data and body_data.refresh_token else None) or request.cookies.get("refresh_token")
 
     if not refresh_token_str:
         raise AuthenticationError("refresh_token is required")
@@ -548,15 +624,19 @@ def refresh_token(
         {"sub": str(user.id), "username": user.username}
     )
 
-    return {
-        "success": True,
-        "message": "Tokens refreshed (old refresh token revoked)",
-        "data": {
-            "access_token": access_token,
-            "refresh_token": new_refresh_token,
-            "token_type": "bearer",
-        },
-    }
+    json_resp = JSONResponse(
+        content={
+            "success": True,
+            "message": "Tokens refreshed (old refresh token revoked)",
+            "data": {
+                "token_type": "bearer",
+            },
+        }
+    )
+    _set_auth_cookies(json_resp, access_token, new_refresh_token)
+    return json_resp
+
+
 
 
 # ── GET /me ────────────────────────────────────────────────────────────────
@@ -685,6 +765,24 @@ def list_users(
     }
 
 
+def _enforce_tenant_user_access(target_user: User, current_user: User) -> None:
+    """
+    Strict multi-tenant security barrier:
+    - Super-admins ('super_admin') have global cross-tenant access.
+    - Tenant admins ('admin') are strictly constrained to their own organization (target_user.org_id == current_user.org_id).
+    - Tenant admins can NEVER view, modify, reset, or delete users belonging to another organization.
+    - Tenant admins can NEVER modify super-admin accounts.
+    """
+    if current_user.role == "super_admin":
+        return
+
+    if target_user.role == "super_admin":
+        raise AuthorizationError("You do not have permission to manage platform super-admin accounts")
+
+    if current_user.org_id is None or target_user.org_id != current_user.org_id:
+        raise AuthorizationError("Cross-tenant operation denied: user belongs to another organization")
+
+
 # ── GET /users/{user_id} ──────────────────────────────────────────────────
 
 
@@ -698,13 +796,108 @@ def get_user_detail(
     if not user:
         raise NotFoundError("User", user_id)
 
+    _enforce_tenant_user_access(user, current_user)
+
     return {
         "success": True,
         "data": _user_dict(user),
     }
 
 
+# ── PUT /users/{user_id} ──────────────────────────────────────────────────
+
+
+
+@router.put("/users/{user_id}", response_model=dict)
+def update_user_profile_by_admin(
+    user_id: int,
+    request_body: UserUpdate,
+    request: Request,
+    db: Session = Depends(get_user_repo),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Update staff or vendor user details.
+    Enforces tenant boundaries and validates that assigned location IDs belong to the organization.
+    """
+    user = db.get_by_id(user_id)
+    if not user:
+        raise NotFoundError("User", user_id)
+
+    _enforce_tenant_user_access(user, current_user)
+
+    # 1. Email update & uniqueness
+    if request_body.email and request_body.email.lower() != user.email.lower():
+        existing_email = db.get_by_email(request_body.email)
+        if existing_email and existing_email.id != user.id:
+            raise DuplicateError(f"Email '{request_body.email}' is already registered")
+        user.email = request_body.email.lower()
+
+    # 2. Username update & uniqueness
+    if request_body.username and request_body.username.strip().lower() != user.username.lower():
+        existing_username = db.get_by_username(request_body.username.strip())
+        if existing_username and existing_username.id != user.id:
+            raise DuplicateError(f"Username '{request_body.username}' is already taken")
+        user.username = request_body.username.strip()
+
+    # 3. Full name
+    if request_body.full_name is not None:
+        user.full_name = request_body.full_name.strip()
+
+    # 4. Role
+    if request_body.role is not None:
+        if request_body.role not in ["admin", "staff", "vendor", "super_admin"]:
+            raise ValidationError(f"Invalid role: {request_body.role}")
+        if request_body.role == "super_admin" and current_user.role != "super_admin":
+            raise AuthorizationError("Only platform super-admins can assign the super_admin role")
+        user.role = request_body.role
+
+    # 5. Is active
+    if request_body.is_active is not None:
+        if user.id == current_user.id and not request_body.is_active:
+            raise ValidationError("Cannot deactivate your own account")
+        user.is_active = request_body.is_active
+
+    # 6. Location assignments validation
+    if request_body.location_ids is not None:
+        loc_ids = request_body.location_ids
+        target_org = user.org_id or current_user.org_id
+        if loc_ids and current_user.role != "super_admin":
+            if target_org is None:
+                raise AuthorizationError("User is not assigned to an organization")
+            valid_locs = db.db.query(Location.id).filter(
+                Location.id.in_(loc_ids),
+                Location.org_id == target_org,
+            ).all()
+            valid_set = {loc[0] for loc in valid_locs}
+            invalid_ids = [lid for lid in loc_ids if lid not in valid_set]
+            if invalid_ids:
+                raise ValidationError(f"Invalid location ID(s): {invalid_ids}. Locations must belong to your organization.")
+        user.location_ids = loc_ids
+
+    db.update(user)
+
+    # Audit log
+    audit = AuditService(db.db)
+    audit.log(
+        username=current_user.username,
+        action="USER_UPDATED",
+        resource_type="user",
+        resource_id=str(user.id),
+        user_id=current_user.id,
+        details={"target_user": user.username},
+        ip_address=_get_client_ip(request),
+    )
+
+    return {
+        "success": True,
+        "message": f"User {user.username} updated successfully",
+        "data": _user_dict(user),
+    }
+
+
 # ── PUT /users/{user_id}/role ─────────────────────────────────────────────
+
 
 
 @router.put("/users/{user_id}/role", response_model=dict)
@@ -719,9 +912,13 @@ def update_user_role(
     if not user:
         raise NotFoundError("User", user_id)
 
-    if request_body.role not in ["admin", "staff", "vendor"]:
+    _enforce_tenant_user_access(user, current_user)
+
+    if request_body.role not in ["admin", "staff", "vendor", "super_admin"]:
         raise ValidationError(f"Invalid role: {request_body.role}")
 
+    if request_body.role == "super_admin" and current_user.role != "super_admin":
+        raise AuthorizationError("Only platform super-admins can assign the super_admin role")
 
     old_role = user.role
     user.role = request_body.role
@@ -764,6 +961,8 @@ def activate_user(
     if not user:
         raise NotFoundError("User", user_id)
 
+    _enforce_tenant_user_access(user, current_user)
+
     user.is_active = True
     db.update(user)
 
@@ -798,6 +997,8 @@ def deactivate_user(
     user = db.get_by_id(user_id)
     if not user:
         raise NotFoundError("User", user_id)
+
+    _enforce_tenant_user_access(user, current_user)
 
     if user.id == current_user.id:
         raise ValidationError("Cannot deactivate your own account")
@@ -838,6 +1039,8 @@ def admin_reset_password(
     if not user:
         raise NotFoundError("User", user_id)
 
+    _enforce_tenant_user_access(user, current_user)
+
     user.hashed_password = hash_password(request_body.new_password)
     # Also unlock and reset attempts if they were locked
     user.login_attempts = 0
@@ -876,6 +1079,8 @@ def delete_user(
     if not user:
         raise NotFoundError("User", user_id)
 
+    _enforce_tenant_user_access(user, current_user)
+
     if user.id == current_user.id:
         raise ValidationError("Cannot delete your own account")
 
@@ -898,6 +1103,7 @@ def delete_user(
         "success": True,
         "message": f"User {deleted_username} deleted",
     }
+
 
 
 # ── POST /request-password-reset ────────────────────────────────────────────
@@ -963,6 +1169,14 @@ def reset_password(
     if payload.get("type") != "password_reset":
         raise AuthenticationError("Invalid token type")
 
+    # ── Single-use check: consume the JTI atomically ──────────────────────
+    jti = payload.get("jti")
+    if not jti:
+        raise AuthenticationError("Invalid password reset token: missing jti")
+    from app.infrastructure.cache.token_blacklist import consume_reset_jti
+    if not consume_reset_jti(jti):
+        raise AuthenticationError("Password reset token has already been used or has expired")
+
     user_id = payload.get("sub")
     user = db.get_by_id(user_id)
 
@@ -978,6 +1192,20 @@ def reset_password(
     user.login_attempts = 0
     user.locked_until = None
     db.update(user)
+
+    # ── Invalidate all existing sessions for this user ────────────────────
+    # This ensures no stale access tokens work after a password reset.
+    # We rely on the auth L1 cache eviction; Redis blacklisting of the
+    # individual tokens requires the token strings, which we don't have here,
+    # so instead we store a user-level invalidation marker.
+    try:
+        from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+        r = get_redis()
+        if r and is_redis_available():
+            # Mark this user's session as reset — dependencies.py can check this
+            r.setex(f"user_pw_changed:{user.id}", 3600 * 24, str(int(__import__('time').time())))
+    except Exception:
+        pass
 
     # Audit log
     audit = AuditService(db.db)
@@ -1059,26 +1287,28 @@ def verify_email(
 # ── POST /google-auth ──────────────────────────────────────────────────────
 
 
-@router.post("/google-auth", response_model=dict)
+@router.post("/google-auth")
 @limiter.limit("10/minute")
 def google_auth(
     request: Request,
+    response: Response,
     request_body: GoogleAuthRequest,
     db: Session = Depends(get_user_repo),
 ):
+
     """Authenticate or register user via Google OAuth."""
     try:
         # Verify the ID token with Google
-        response = httpx.get(
+        response_ext = httpx.get(
             settings.GOOGLE_OAUTH_VERIFY_URL,
             headers={"Authorization": f"Bearer {request_body.id_token}"},
             timeout=10,
         )
 
-        if response.status_code != 200:
+        if response_ext.status_code != 200:
             raise AuthenticationError("Invalid Google ID token")
 
-        google_user = response.json()
+        google_user = response_ext.json()
         google_email = google_user.get("email")
         google_name = google_user.get("name", "")
 
@@ -1107,6 +1337,9 @@ def google_auth(
                 {"sub": str(user.id), "username": user.username}
             )
 
+            # Set HttpOnly, SameSite cookies
+            _set_auth_cookies(response, access_token, refresh_token)
+
             audit = AuditService(db.db)
             audit.log(
                 username=user.username,
@@ -1117,16 +1350,18 @@ def google_auth(
                 ip_address=_get_client_ip(request),
             )
 
-            return {
-                "success": True,
-                "message": "Login successful",
-                "data": {
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                    "token_type": "bearer",
-                    "user": _user_dict(user),
-                },
-            }
+            json_resp = JSONResponse(
+                content={
+                    "success": True,
+                    "message": "Login successful",
+                    "data": {
+                        "token_type": "bearer",
+                        "user": _user_dict(user),
+                    },
+                }
+            )
+            _set_auth_cookies(json_resp, access_token, refresh_token)
+            return json_resp
 
         # New user - create account as Pharmacy Store Owner (Admin)
         from app.infrastructure.database.models import Organization, Location
@@ -1181,7 +1416,6 @@ def google_auth(
         user.is_active = True
         db.update(user)
 
-
         access_token = create_access_token(
             {
                 "sub": str(user.id),
@@ -1205,18 +1439,22 @@ def google_auth(
             ip_address=_get_client_ip(request),
         )
 
-        return {
-            "success": True,
-            "message": "Account created successfully via Google",
-            "data": {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "token_type": "bearer",
-                "user": _user_dict(user),
-            },
-        }
+        json_resp = JSONResponse(
+            content={
+                "success": True,
+                "message": "Account created successfully via Google",
+                "data": {
+                    "token_type": "bearer",
+                    "user": _user_dict(user),
+                },
+            }
+        )
+        _set_auth_cookies(json_resp, access_token, refresh_token)
+        return json_resp
+
 
     except httpx.RequestError as e:
         logger.error(f"Google OAuth error: {e}")
         raise AuthenticationError("Failed to verify Google account")
+
 

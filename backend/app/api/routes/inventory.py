@@ -3,24 +3,31 @@ Inventory API routes.
 
 Routes receive pre-configured services via FastAPI's Depends() system.
 No direct DB queries here — everything goes through the service layer.
+
+All routes are org-scoped: super_admin sees all tenants (org_id=None),
+all other roles see only their own organization's data.
 """
 
 from fastapi import APIRouter, Depends, Request
 from typing import Optional
 from app.core.rate_limiter import limiter
 from app.core.dependencies import (
-
     get_inventory_service,
     get_inventory_repo,
     get_current_user,
     require_staff,
     require_admin,
+    require_super_admin,
+    get_caller_org_id,
 )
 
 from app.core.exceptions import (
     NotFoundError,
     DuplicateError,
+    AuthorizationError,
+    ValidationError,
 )
+
 from app.application.inventory_service import InventoryService
 from app.application.cache_service import (
     cache_get,
@@ -34,12 +41,46 @@ from app.api.schemas.inventory_schemas import (
     SingleTransactionRequest,
     BulkTransactionRequest,
     CreateLocationRequest,
+    UpdateLocationRequest,
     CreateItemRequest,
+    UpdateItemRequest,
     ResetDataRequest,
     ScanDispenseRequest,
 )
 
+
+
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
+
+
+def _caller_org_id(user: User) -> Optional[int]:
+    """Return org_id for tenant-scoped operations using central dependency rule."""
+    return get_caller_org_id(user)
+
+
+def _has_location_access(user: User, target_location_id: int) -> bool:
+    """Check if staff or vendor user is permitted to access/mutate this location."""
+    raw = getattr(user, "location_ids", None)
+    if not raw:
+        return True  # None or empty means unrestricted/all branches in user's org
+    if isinstance(raw, str):
+        import json
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = [raw]
+    if isinstance(raw, (list, set, tuple)):
+        allowed_ids = set()
+        for item in raw:
+            try:
+                allowed_ids.add(int(item))
+            except (ValueError, TypeError):
+                pass
+        if not allowed_ids:
+            return True
+        return target_location_id in allowed_ids
+    return True
+
 
 
 @router.get("/locations")
@@ -49,13 +90,14 @@ def get_all_locations(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: User = Depends(get_current_user),
 ):
-    """List all locations with pagination and 5-minute tiered cache."""
-    cache_key = f"ref:locations:{limit}:{offset}"
+    """List locations for the caller's organization with 5-minute tiered cache."""
+    org_id = _caller_org_id(current_user)
+    cache_key = f"ref:locations:{org_id}:{limit}:{offset}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    locations = repo.get_all_locations(limit=limit, offset=offset)
+    locations = repo.get_all_locations(limit=limit, offset=offset, org_id=org_id)
     res = {
         "success": True,
         "data": [
@@ -65,6 +107,7 @@ def get_all_locations(
     }
     cache_set(cache_key, res, ttl=300)
     if limit == 50 and offset == 0:
+        cache_set(f"ref:locations:{org_id}", res, ttl=300)
         cache_set("ref:locations", res, ttl=300)
     return res
 
@@ -76,13 +119,14 @@ def get_all_items(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: User = Depends(get_current_user),
 ):
-    """List all inventory items with pagination and 5-minute tiered cache."""
-    cache_key = f"ref:items:{limit}:{offset}"
+    """List items for the caller's organization with 5-minute tiered cache."""
+    org_id = _caller_org_id(current_user)
+    cache_key = f"ref:items:{org_id}:{limit}:{offset}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    items = repo.get_all_items(limit=limit, offset=offset)
+    items = repo.get_all_items(limit=limit, offset=offset, org_id=org_id)
     res = {
         "success": True,
         "data": [
@@ -101,6 +145,7 @@ def get_all_items(
     }
     cache_set(cache_key, res, ttl=300)
     if limit == 50 and offset == 0:
+        cache_set(f"ref:items:{org_id}", res, ttl=300)
         cache_set("ref:items", res, ttl=300)
     return res
 
@@ -114,17 +159,18 @@ def get_location_items(
     service: InventoryService = Depends(get_inventory_service),
     current_user: User = Depends(get_current_user),
 ):
-    """Get location item stock list with a 5-minute Redis cache."""
-    cache_key = f"ref:location_items:{location_id}"
+    """Get location item stock list with a 5-minute Redis cache (org-scoped)."""
+    org_id = _caller_org_id(current_user)
+    cache_key = f"ref:location_items:{org_id}:{location_id}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    location = repo.get_location_by_id(location_id)
+    location = repo.get_location_by_id(location_id, org_id=org_id)
     if not location:
         raise NotFoundError("Location", location_id)
 
-    items = service.get_location_items(location_id)
+    items = service.get_location_items(location_id, org_id=org_id)
     res = {
         "success": True,
         "location": {"id": location.id, "name": location.name},
@@ -138,11 +184,18 @@ def get_location_items(
 def get_current_stock(
     location_id: int,
     item_id: int,
+    repo: InventoryRepository = Depends(get_inventory_repo),
     service: InventoryService = Depends(get_inventory_service),
     current_user: User = Depends(get_current_user),
 ):
-    stock = service.get_latest_stock(location_id, item_id)
+    org_id = _caller_org_id(current_user)
+    # Ownership check
+    if not repo.get_location_by_id(location_id, org_id=org_id):
+        raise NotFoundError("Location", location_id)
+    if not repo.get_item_by_id(item_id, org_id=org_id):
+        raise NotFoundError("Item", item_id)
 
+    stock = service.get_latest_stock(location_id, item_id)
 
     if stock is None:
         return {
@@ -162,7 +215,8 @@ def create_location(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: User = Depends(require_staff),
 ):
-    existing = repo.get_location_by_name(body.name.strip())
+    org_id = _caller_org_id(current_user)
+    existing = repo.get_location_by_name(body.name.strip(), org_id=org_id)
     if existing:
         raise DuplicateError(f"Location '{body.name}' already exists")
 
@@ -171,6 +225,7 @@ def create_location(
         type=body.type.strip().lower(),
         region=body.region.strip(),
         address=body.address.strip() if body.address else None,
+        org_id=org_id,
     )
 
     cache_invalidate_pattern("ref:*")
@@ -184,8 +239,136 @@ def create_location(
             "type": location.type,
             "region": location.region,
             "address": location.address,
+            "is_active": location.is_active,
         },
     }
+
+
+@router.put("/locations/{location_id}")
+@limiter.limit("20/minute")
+def update_location(
+    location_id: int,
+    request: Request,
+    body: UpdateLocationRequest,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_admin),
+):
+    """Update or rename an organization branch/location."""
+    org_id = _caller_org_id(current_user)
+    location = repo.get_location_by_id(location_id, org_id=org_id)
+    if not location:
+        raise NotFoundError("Location", location_id)
+
+    update_fields = {}
+    if body.name is not None:
+        new_name = body.name.strip()
+        existing = repo.get_location_by_name(new_name, org_id=org_id)
+        if existing and existing.id != location_id:
+            raise DuplicateError(f"A branch named '{new_name}' already exists in your organization")
+        update_fields["name"] = new_name
+    if body.type is not None:
+        update_fields["type"] = body.type.strip().lower()
+    if body.region is not None:
+        update_fields["region"] = body.region.strip()
+    if body.address is not None:
+        update_fields["address"] = body.address.strip()
+    if body.phone is not None:
+        update_fields["phone"] = body.phone.strip()
+    if body.pincode is not None:
+        update_fields["pincode"] = body.pincode.strip()
+    if body.radius_meters is not None:
+        update_fields["radius_meters"] = body.radius_meters
+    if body.is_active is not None:
+        update_fields["is_active"] = body.is_active
+
+    updated = repo.update_location(location, **update_fields)
+    cache_invalidate_pattern("ref:*")
+
+    return {
+        "success": True,
+        "message": f"Branch '{updated.name}' updated successfully",
+        "data": {
+            "id": updated.id,
+            "name": updated.name,
+            "type": updated.type,
+            "region": updated.region,
+            "address": updated.address,
+            "phone": updated.phone,
+            "pincode": updated.pincode,
+            "radius_meters": updated.radius_meters,
+            "is_active": updated.is_active,
+        },
+    }
+
+
+@router.delete("/locations/{location_id}")
+@limiter.limit("20/minute")
+def delete_or_archive_location(
+    location_id: int,
+    request: Request,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Remove or safely archive a branch.
+    If historical transactions or stock exist, the branch is safely archived (is_active=False).
+    If no transactions exist, it is permanently deleted.
+    """
+    org_id = _caller_org_id(current_user)
+    location = repo.get_location_by_id(location_id, org_id=org_id)
+    if not location:
+        raise NotFoundError("Location", location_id)
+
+    has_history = repo.has_location_transactions(location_id)
+    if has_history:
+        # Safe archive
+        repo.update_location(location, is_active=False)
+        cache_invalidate_pattern("ref:*")
+        return {
+            "success": True,
+            "action": "archived",
+            "message": f"Branch '{location.name}' has been safely archived because historical stock records exist.",
+            "data": {"id": location.id, "name": location.name, "is_active": False},
+        }
+    else:
+        # Safe hard delete
+        loc_name = location.name
+        loc_id = location.id
+        repo.delete_location(location)
+        cache_invalidate_pattern("ref:*")
+        return {
+            "success": True,
+            "action": "deleted",
+            "message": f"Branch '{loc_name}' has been permanently deleted.",
+            "data": {"id": loc_id, "name": loc_name},
+        }
+
+
+@router.patch("/locations/{location_id}/toggle-active")
+@limiter.limit("20/minute")
+def toggle_location_active(
+    location_id: int,
+    request: Request,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_admin),
+):
+    """Toggle a branch between active and inactive/archived status."""
+    org_id = _caller_org_id(current_user)
+    location = repo.get_location_by_id(location_id, org_id=org_id)
+    if not location:
+        raise NotFoundError("Location", location_id)
+
+    new_status = not bool(location.is_active)
+    updated = repo.update_location(location, is_active=new_status)
+    cache_invalidate_pattern("ref:*")
+
+    status_str = "activated" if new_status else "deactivated/archived"
+    return {
+        "success": True,
+        "message": f"Branch '{updated.name}' is now {status_str}.",
+        "data": {"id": updated.id, "name": updated.name, "is_active": updated.is_active},
+    }
+
 
 
 @router.post("/items")
@@ -196,7 +379,8 @@ def create_item(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: User = Depends(require_staff),
 ):
-    existing = repo.get_item_by_name(body.name.strip())
+    org_id = _caller_org_id(current_user)
+    existing = repo.get_item_by_name(body.name.strip(), org_id=org_id)
     if existing:
         raise DuplicateError(f"Item '{body.name}' already exists")
 
@@ -204,9 +388,14 @@ def create_item(
         name=body.name.strip(),
         category=body.category.strip().lower(),
         unit=body.unit.strip().lower(),
+        barcode=body.barcode.strip() if body.barcode else None,
+        strength=body.strength.strip() if body.strength else None,
+        mrp=body.mrp or 0.0,
+        purchase_rate=body.purchase_rate or 0.0,
         lead_time_days=body.lead_time_days,
         min_stock=body.min_stock,
         storage_temp=body.storage_temp or "ambient",
+        org_id=org_id,
     )
 
     cache_invalidate_pattern("ref:*")
@@ -219,11 +408,174 @@ def create_item(
             "name": item.name,
             "category": item.category,
             "unit": item.unit,
+            "barcode": item.barcode,
+            "strength": item.strength,
+            "mrp": item.mrp,
+            "purchase_rate": item.purchase_rate,
             "lead_time_days": item.lead_time_days,
             "min_stock": item.min_stock,
             "storage_temp": item.storage_temp,
         },
     }
+
+
+@router.get("/items/barcode/{barcode}")
+@limiter.limit("60/minute")
+def get_item_by_barcode(
+    request: Request,
+    barcode: str,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_staff),
+):
+    """Look up a medicine/item by its barcode for the caller's organization."""
+    org_id = _caller_org_id(current_user)
+    item = repo.get_item_by_barcode(barcode, org_id=org_id)
+    if not item:
+        raise NotFoundError("Item", barcode)
+
+    return {
+        "success": True,
+        "data": {
+            "id": item.id,
+            "name": item.name,
+            "category": item.category,
+            "unit": item.unit,
+            "barcode": item.barcode,
+            "strength": item.strength,
+            "mrp": item.mrp,
+            "purchase_rate": item.purchase_rate,
+            "lead_time_days": item.lead_time_days,
+            "min_stock": item.min_stock,
+            "storage_temp": item.storage_temp,
+        },
+    }
+
+
+@router.get("/items/{item_id}")
+@limiter.limit("60/minute")
+def get_item_detail(
+    request: Request,
+    item_id: int,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_staff),
+):
+    """Get single item detail by ID."""
+    org_id = _caller_org_id(current_user)
+    item = repo.get_item_by_id(item_id, org_id=org_id)
+    if not item:
+        raise NotFoundError("Item", item_id)
+
+    return {
+        "success": True,
+        "data": {
+            "id": item.id,
+            "name": item.name,
+            "category": item.category,
+            "unit": item.unit,
+            "barcode": item.barcode,
+            "strength": item.strength,
+            "mrp": item.mrp,
+            "purchase_rate": item.purchase_rate,
+            "lead_time_days": item.lead_time_days,
+            "min_stock": item.min_stock,
+            "storage_temp": item.storage_temp,
+        },
+    }
+
+
+@router.put("/items/{item_id}")
+@limiter.limit("30/minute")
+def update_item(
+    request: Request,
+    item_id: int,
+    body: UpdateItemRequest,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_admin),
+):
+    """Update medicine/item master metadata."""
+    org_id = _caller_org_id(current_user)
+    item = repo.get_item_by_id(item_id, org_id=org_id)
+    if not item:
+        raise NotFoundError("Item", item_id)
+
+    update_kwargs = {}
+    if body.name is not None:
+        update_kwargs["name"] = body.name.strip()
+    if body.category is not None:
+        update_kwargs["category"] = body.category.strip().lower()
+    if body.unit is not None:
+        update_kwargs["unit"] = body.unit.strip().lower()
+    if body.barcode is not None:
+        update_kwargs["barcode"] = body.barcode.strip() if body.barcode else None
+    if body.strength is not None:
+        update_kwargs["strength"] = body.strength.strip() if body.strength else None
+    if body.mrp is not None:
+        update_kwargs["mrp"] = body.mrp
+    if body.purchase_rate is not None:
+        update_kwargs["purchase_rate"] = body.purchase_rate
+    if body.lead_time_days is not None:
+        update_kwargs["lead_time_days"] = body.lead_time_days
+    if body.min_stock is not None:
+        update_kwargs["min_stock"] = body.min_stock
+    if body.storage_temp is not None:
+        update_kwargs["storage_temp"] = body.storage_temp
+
+    updated = repo.update_item(item, **update_kwargs)
+    cache_invalidate_pattern("ref:*")
+    cache_invalidate_pattern("analytics:*")
+
+    return {
+        "success": True,
+        "message": f"Item '{updated.name}' updated successfully",
+        "data": {
+            "id": updated.id,
+            "name": updated.name,
+            "category": updated.category,
+            "unit": updated.unit,
+            "barcode": updated.barcode,
+            "strength": updated.strength,
+            "mrp": updated.mrp,
+            "purchase_rate": updated.purchase_rate,
+            "lead_time_days": updated.lead_time_days,
+            "min_stock": updated.min_stock,
+            "storage_temp": updated.storage_temp,
+        },
+    }
+
+
+@router.delete("/items/{item_id}")
+@limiter.limit("20/minute")
+def delete_item(
+    request: Request,
+    item_id: int,
+    repo: InventoryRepository = Depends(get_inventory_repo),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Remove an item.
+    Safe deletion rule: Rejects deletion if historical transactions exist.
+    """
+    org_id = _caller_org_id(current_user)
+    item = repo.get_item_by_id(item_id, org_id=org_id)
+    if not item:
+        raise NotFoundError("Item", item_id)
+
+    if repo.has_item_transactions(item_id):
+        raise ValidationError(
+            f"Cannot delete item '{item.name}' because historical inventory transactions exist. "
+            "Archive or update the item instead."
+        )
+
+    deleted_name = item.name
+    repo.delete_item(item)
+    cache_invalidate_pattern("ref:*")
+    cache_invalidate_pattern("analytics:*")
+
+    return {
+        "success": True,
+        "message": f"Item '{deleted_name}' deleted successfully",
+    }
+
 
 
 @router.post("/reset-data")
@@ -234,14 +586,17 @@ def reset_inventory_data(
     repo: InventoryRepository = Depends(get_inventory_repo),
     current_user: User = Depends(require_admin),
 ):
+    """Delete inventory data for the caller's organization only.
+    super_admin can delete all-tenant data; regular admins are strictly org-scoped."""
     if not body.confirm:
         from app.core.exceptions import ValidationError
-
         raise ValidationError("Set confirm=true to reset data")
 
-    deleted_transactions = repo.delete_all_transactions()
-    deleted_items = repo.delete_all_items()
-    deleted_locations = repo.delete_all_locations()
+    org_id = _caller_org_id(current_user)
+
+    deleted_transactions = repo.delete_all_transactions(org_id=org_id)
+    deleted_items = repo.delete_all_items(org_id=org_id)
+    deleted_locations = repo.delete_all_locations(org_id=org_id)
 
     cache_invalidate_pattern("ref:*")
     cache_invalidate_pattern("analytics:*")
@@ -266,10 +621,14 @@ def add_single_transaction(
     service: InventoryService = Depends(get_inventory_service),
     current_user: User = Depends(require_staff),
 ):
-    if not repo.get_location_by_id(body.location_id):
+    org_id = _caller_org_id(current_user)
+    if not repo.get_location_by_id(body.location_id, org_id=org_id):
         raise NotFoundError("Location", body.location_id)
-    if not repo.get_item_by_id(body.item_id):
+    if not repo.get_item_by_id(body.item_id, org_id=org_id):
         raise NotFoundError("Item", body.item_id)
+
+    if current_user.role == "staff" and not _has_location_access(current_user, body.location_id):
+        raise AuthorizationError(f"Staff account is not authorized for Location #{body.location_id}")
 
     result = service.add_transaction(
         location_id=body.location_id,
@@ -296,8 +655,16 @@ def add_bulk_transactions(
     service: InventoryService = Depends(get_inventory_service),
     current_user: User = Depends(require_staff),
 ):
-    if not repo.get_location_by_id(body.location_id):
+    org_id = _caller_org_id(current_user)
+    if not repo.get_location_by_id(body.location_id, org_id=org_id):
         raise NotFoundError("Location", body.location_id)
+
+    if current_user.role == "staff" and not _has_location_access(current_user, body.location_id):
+        raise AuthorizationError(f"Staff account is not authorized for Location #{body.location_id}")
+
+    for item in body.items:
+        if not repo.get_item_by_id(item.item_id, org_id=org_id):
+            raise NotFoundError("Item", item.item_id)
 
     items_data = [
         {
@@ -336,22 +703,20 @@ def scan_dispense_item(
     Validates barcode, selects earliest-expiring active batch (FEFO order),
     atomically decrements stock, records transaction, and broadcasts real-time updates.
     """
-    location = repo.get_location_by_id(body.location_id)
+    org_id = _caller_org_id(current_user)
+    location = repo.get_location_by_id(body.location_id, org_id=org_id)
     if not location:
         raise NotFoundError("Location", body.location_id)
 
     # Scoped staff validation: if user has assigned location_ids, check authorization
-    if current_user.role == "staff" and current_user.location_ids:
-        if body.location_id not in current_user.location_ids:
-            from app.core.exceptions import AuthorizationError
-            raise AuthorizationError(f"Staff account is not authorized to dispense at Location #{body.location_id}")
-
+    if current_user.role == "staff" and not _has_location_access(current_user, body.location_id):
+        raise AuthorizationError(f"Staff account is not authorized to dispense at Location #{body.location_id}")
 
     return service.dispense_by_barcode(
         barcode_or_id=body.barcode,
         location_id=body.location_id,
         quantity=body.quantity,
         entered_by=str(current_user.username),
-        org_id=current_user.org_id if current_user.role != "super_admin" else None,
+        org_id=org_id,
     )
 

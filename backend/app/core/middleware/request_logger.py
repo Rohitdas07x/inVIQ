@@ -58,11 +58,12 @@ class RequestLoggerMiddleware:
             if message["type"] == "http.response.start":
                 status_code[0] = message["status"]
                 duration_ms = (time.perf_counter() - start_time) * 1000
-                headers = dict(message.get("headers", []))
-                headers[b"x-request-id"] = request_id.encode()
-                headers[b"x-process-time-ms"] = f"{duration_ms:.2f}".encode()
-                message = {**message, "headers": list(headers.items())}
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", request_id.encode()))
+                headers.append((b"x-process-time-ms", f"{duration_ms:.2f}".encode()))
+                message = {**message, "headers": headers}
             await send(message)
+
 
         await self.app(scope, receive, send_wrapper)
 

@@ -86,11 +86,14 @@ class ReadOnlySession:
 _db_session_var: contextvars.ContextVar = contextvars.ContextVar(
     "db_session", default=None
 )
+_org_id_var: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_org_id", default=None
+)
 
 
-def set_db_session(db: Session) -> None:
+def set_db_session(db: Session, org_id: Optional[int] = None) -> None:
     """
-    Bind a read-only view of the DB session into the current context.
+    Bind a read-only view of the DB session and tenant org_id into the current context.
 
     The session is wrapped in ReadOnlySession so agent @tool functions
     can query inventory data but can NEVER commit, add, delete, or flush.
@@ -98,11 +101,18 @@ def set_db_session(db: Session) -> None:
     any SQL reaches the database.
     """
     _db_session_var.set(ReadOnlySession(db))
+    _org_id_var.set(org_id)
 
 
 def _get_db() -> Optional["ReadOnlySession"]:
     """Return the read-only DB proxy for the current context."""
     return _db_session_var.get()
+
+
+def _get_org_id() -> Optional[int]:
+    """Return the tenant org_id for the current agent context."""
+    return _org_id_var.get()
+
 
 def _no_data_message(message: str) -> List[Dict[str, Any]]:
     return [{"info": message}]
@@ -116,10 +126,20 @@ def get_inventory_overview() -> Dict[str, Any]:
         return {"error": "Database not connected"}
 
     try:
-        locations_count = db.query(Location).count()
-        items_count = db.query(Item).count()
-        transactions_count = db.query(InventoryTransaction).count()
-        min_date, max_date = db.query(
+        org_id = _get_org_id()
+        loc_q = db.query(Location)
+        item_q = db.query(Item)
+        tx_q = db.query(InventoryTransaction).join(Location, InventoryTransaction.location_id == Location.id)
+
+        if org_id is not None:
+            loc_q = loc_q.filter(Location.org_id == org_id)
+            item_q = item_q.filter(Item.org_id == org_id)
+            tx_q = tx_q.filter(Location.org_id == org_id)
+
+        locations_count = loc_q.count()
+        items_count = item_q.count()
+        transactions_count = tx_q.count()
+        min_date, max_date = tx_q.with_entities(
             func.min(InventoryTransaction.date),
             func.max(InventoryTransaction.date),
         ).one()
@@ -149,7 +169,8 @@ def get_critical_items(
         if severity not in {"CRITICAL", "WARNING"}:
             return [{"error": "Severity must be CRITICAL or WARNING"}]
 
-        alerts = get_critical_alerts(db, severity)
+        org_id = _get_org_id()
+        alerts = get_critical_alerts(db, severity, org_id=org_id)
 
         if location and location.strip():
             alerts = [
@@ -276,7 +297,8 @@ def get_stock_health(item: str = "", location: str = "") -> List[Dict[str, Any]]
         return [{"error": "Database not connected"}]
 
     try:
-        stock_health = get_latest_stock_health(db)
+        org_id = _get_org_id()
+        stock_health = get_latest_stock_health(db, org_id=org_id)
 
         if item and item.strip():
             stock_health = [
@@ -331,7 +353,8 @@ def calculate_reorder_suggestions(location: str = "") -> List[Dict[str, Any]]:
         return [{"error": "Database not connected"}]
 
     try:
-        critical = get_critical_alerts(db, "CRITICAL")
+        org_id = _get_org_id()
+        critical = get_critical_alerts(db, "CRITICAL", org_id=org_id)
 
         if location and location.strip():
             critical = [
@@ -386,7 +409,8 @@ def get_location_summary(location_name: str) -> Dict[str, Any]:
         return {"error": "Database not connected"}
 
     try:
-        stock_health = get_latest_stock_health(db)
+        org_id = _get_org_id()
+        stock_health = get_latest_stock_health(db, org_id=org_id)
 
         location_data = [
             s for s in stock_health if location_name.lower() in s.location_name.lower()
@@ -418,7 +442,8 @@ def get_category_analysis(category: str) -> List[Dict[str, Any]]:
         return [{"error": "Database not connected"}]
 
     try:
-        stock_health = get_latest_stock_health(db)
+        org_id = _get_org_id()
+        stock_health = get_latest_stock_health(db, org_id=org_id)
 
         category_data = [
             s for s in stock_health if _match_medicine(s.item_name, s.category, category)
@@ -469,10 +494,14 @@ def get_consumption_trends(
 
         start_date = latest_date - timedelta(days=days - 1)
 
-        # Resolve matching items using synonym expansion
+        # Resolve matching items using synonym expansion (scoped by org_id)
+        org_id = _get_org_id()
         matching_item_ids = None
         if item and item.strip():
-            all_items = db.query(Item).all()
+            items_q = db.query(Item)
+            if org_id is not None:
+                items_q = items_q.filter(Item.org_id == org_id)
+            all_items = items_q.all()
             matching_item_ids = [
                 it.id for it in all_items if _match_medicine(it.name, it.category, item)
             ]
@@ -488,6 +517,9 @@ def get_consumption_trends(
             .join(Item, InventoryTransaction.item_id == Item.id)
             .filter(InventoryTransaction.date >= start_date)
         )
+
+        if org_id is not None:
+            query = query.filter(Location.org_id == org_id)
 
         if matching_item_ids is not None:
             query = query.filter(InventoryTransaction.item_id.in_(matching_item_ids))
@@ -534,8 +566,9 @@ def get_near_expiry_items(days: int = 60) -> List[Dict[str, Any]]:
         return [{"error": "Database not connected"}]
 
     try:
+        org_id = _get_org_id()
         cutoff = date.today() + timedelta(days=days)
-        rows = (
+        q = (
             db.query(InventoryTransaction)
             .join(Item, InventoryTransaction.item_id == Item.id)
             .join(Location, InventoryTransaction.location_id == Location.id)
@@ -544,7 +577,12 @@ def get_near_expiry_items(days: int = 60) -> List[Dict[str, Any]]:
                 InventoryTransaction.expiry_date <= cutoff,
                 InventoryTransaction.received > 0,  # Only inbound batches
             )
-            .order_by(InventoryTransaction.expiry_date.asc())
+        )
+        if org_id is not None:
+            q = q.filter(Location.org_id == org_id)
+
+        rows = (
+            q.order_by(InventoryTransaction.expiry_date.asc())
             .limit(50)
             .all()
         )
@@ -581,9 +619,13 @@ def get_cold_chain_items(location: str = "") -> List[Dict[str, Any]]:
         return [{"error": "Database not connected"}]
 
     try:
+        org_id = _get_org_id()
+        items_q = db.query(Item).filter(Item.storage_temp == "cold_chain")
+        if org_id is not None:
+            items_q = items_q.filter(Item.org_id == org_id)
+
         items = (
-            db.query(Item)
-            .filter(Item.storage_temp == "cold_chain")
+            items_q
             .order_by(Item.category.asc(), Item.name.asc())
             .limit(50)
             .all()
@@ -596,9 +638,11 @@ def get_cold_chain_items(location: str = "") -> List[Dict[str, Any]]:
         for item in items:
             tx_query = (
                 db.query(InventoryTransaction)
-                .join(Location)
+                .join(Location, InventoryTransaction.location_id == Location.id)
                 .filter(InventoryTransaction.item_id == item.id)
             )
+            if org_id is not None:
+                tx_query = tx_query.filter(Location.org_id == org_id)
             if location and location.strip():
                 tx_query = tx_query.filter(Location.name.ilike(f"%{location.strip()}%"))
 
@@ -632,7 +676,10 @@ def search_medicines(query: str = "", category: str = "", storage_temp: str = ""
         return [{"error": "Database not connected"}]
 
     try:
+        org_id = _get_org_id()
         q = db.query(Item)
+        if org_id is not None:
+            q = q.filter(Item.org_id == org_id)
         if storage_temp and storage_temp.strip():
             q = q.filter(Item.storage_temp == storage_temp.strip().lower())
 

@@ -522,3 +522,25 @@ class NotificationService:
         except Exception as e:
             logger.error("Unexpected error sending admin congratulations email to %s: %s", mask_email(to_email), str(e))
             return False
+
+    @staticmethod
+    def send_transactional_email(to_email: str, subject: str, body: str) -> bool:
+        """Generic helper to dispatch transactional notifications via SMTP."""
+        if not settings.SMTP_ENABLED or not settings.SMTP_HOST or not settings.SMTP_USER:
+            logger.info("SMTP disabled/unconfigured — transactional email skipped to %s", mask_email(to_email))
+            return True
+        try:
+            msg = MIMEText(body, "plain", "utf-8")
+            msg["Subject"] = subject
+            msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_USER}>"
+            msg["To"] = to_email
+
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+                server.starttls()
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.send_message(msg)
+            return True
+        except Exception as e:
+            logger.warning("SMTP send_transactional_email error: %s", e)
+            return False
+

@@ -86,6 +86,7 @@ class TestWebSocketBroadcast:
             "type": "stock_alert",
             "item": "Paracetamol",
             "status": "CRITICAL",
+            "org_id": test_user.get("org_id", 1),
         }
         pending_alerts.append(alert_payload)
 
@@ -110,7 +111,7 @@ class TestWebSocketBroadcast:
         """Alerts list is empty after they are dispatched."""
         from app.api.routes.websocket import pending_alerts
 
-        pending_alerts.append({"type": "test_event"})
+        pending_alerts.append({"type": "test_event", "org_id": test_user.get("org_id", 1)})
         with self._open(client, test_user) as ws:
             ws.send_text("ping")
             try:
@@ -120,6 +121,7 @@ class TestWebSocketBroadcast:
                 pass
 
         assert len(pending_alerts) == 0
+
 
 
 class TestConnectionManager:
@@ -180,3 +182,38 @@ class TestConnectionManager:
 
         assert dead_ws not in mgr.active_connections
         assert good_ws in mgr.active_connections
+
+
+class TestWebSocketTicketAuth:
+    """Tests for secure single-use ticket WebSocket authentication."""
+
+    def test_issue_ticket_requires_auth(self, client):
+        client.cookies.clear()
+        res = client.post("/api/websocket/ticket")
+        assert res.status_code in [401, 403]
+
+    def test_issue_and_connect_with_ticket(self, client, test_user):
+        from app.api.routes.websocket import validate_and_consume_ws_ticket
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+        ticket_res = client.post("/api/websocket/ticket", headers=headers)
+        assert ticket_res.status_code == 200
+        ticket = ticket_res.json()["ticket"]
+        assert ticket is not None
+
+        # Connect with the issued ticket
+        with client.websocket_connect(f"/ws/alerts?ticket={ticket}") as ws:
+            ws.send_text("ping")
+            data = ws.receive_json()
+            assert data == {"type": "pong"}
+
+        # Ticket was consumed on connect — must be None now
+        assert validate_and_consume_ws_ticket(ticket) is None
+
+        # Attempting to connect with an invalid/expired ticket must fail
+        with pytest.raises(Exception):
+            with client.websocket_connect("/ws/alerts?ticket=already-consumed-invalid") as ws:
+                ws.send_text("ping")
+                ws.receive_json()
+
+
+

@@ -332,7 +332,8 @@ class TestVoiceTranscribe:
         files = {"file": ("test.webm", b"fake audio bytes", "audio/webm")}
         r = client.post("/api/chat/transcribe", files=files, headers=headers)
         assert r.status_code == 422
-        assert "not configured" in r.json()["detail"].lower()
+        error_msg = r.json().get("error", {}).get("message", "") or r.json().get("detail", "")
+        assert "not configured" in error_msg.lower()
 
     def test_transcribe_success_en_in(self, client, test_user, monkeypatch):
         from app.core.config import settings
@@ -351,7 +352,7 @@ class TestVoiceTranscribe:
         monkeypatch.setitem(sys.modules, "sarvamai", mock_sarvam_mod)
 
         headers = get_auth_header(client, test_user["email"], test_user["password"])
-        files = {"file": ("query.webm", b"sample-audio-data", "audio/webm")}
+        files = {"file": ("query.webm", b"\x1a\x45\xdf\xa3" + b"sample-audio-data-padding-test-bytes-long", "audio/webm")}
         r = client.post("/api/chat/transcribe", files=files, headers=headers)
 
         assert r.status_code == 200

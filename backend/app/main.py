@@ -21,7 +21,9 @@ from app.infrastructure.database.connection import Base, engine
 from app.core.logging_config import setup_logging
 from app.core.error_handlers import register_exception_handlers
 from app.core.middleware.request_logger import RequestLoggerMiddleware
+from app.core.middleware.security_headers import SecurityHeadersMiddleware
 from app.core.security import hash_password
+
 from app.core.rate_limiter import limiter, rate_limit_handler
 from app.infrastructure.database.models import User, AuditLog  # noqa: F401
 from app.infrastructure.cache.redis_client import get_redis, close_redis
@@ -31,49 +33,39 @@ logger = logging.getLogger("smart_inventory")
 
 
 def seed_admin_user():
+    """
+    Seed initial tenant admin user ONLY in development/testing environments.
+    Super-admin provisioning is strictly performed out-of-band via secure CLI scripts
+    (e.g., backend/scripts/provision_super_admin.py) to prevent predictable credential attacks.
+    """
+    if settings.ENVIRONMENT not in ["development", "testing"]:
+        return
+
     try:
         from app.infrastructure.database.connection import SessionLocal
 
         with SessionLocal() as db:
-            # Seed Super Admin
-            existing_super_admin = db.query(User).filter(User.role == "super_admin").first()
-            if not existing_super_admin:
-                super_admin_user = User(
-                    email=settings.SUPER_ADMIN_EMAIL or "sayandip@inviq.io",
-                    username="superadmin",
-                    hashed_password=hash_password("superadmin123"),
-                    full_name="Global Super Admin",
-                    role="super_admin",
-                    is_active=True,
-                    is_verified=True,
-                )
-                db.add(super_admin_user)
-                db.commit()
-                logger.info("Default super_admin created (username: superadmin, email: %s)", super_admin_user.email)
-            else:
-                logger.info("Super admin user already exists")
-
-            # Seed Admin
+            # Seed Admin for local development/testing only if configured
             existing_admin = db.query(User).filter(User.role == "admin").first()
-            if not existing_admin:
+            if not existing_admin and settings.ADMIN_EMAIL and settings.ADMIN_PASSWORD:
                 admin_user = User(
                     email=settings.ADMIN_EMAIL,
-                    username=settings.ADMIN_USERNAME,
+                    username=settings.ADMIN_USERNAME or "admin",
                     hashed_password=hash_password(settings.ADMIN_PASSWORD),
-                    full_name=settings.ADMIN_FULL_NAME,
+                    full_name=settings.ADMIN_FULL_NAME or "Development Admin",
                     role="admin",
                     is_active=True,
                     is_verified=True,
+                    org_id=1,
                 )
                 db.add(admin_user)
                 db.commit()
                 logger.info(
-                    "Default admin user created (username: %s)", settings.ADMIN_USERNAME
+                    "Development admin user created (email: %s)", settings.ADMIN_EMAIL
                 )
-            else:
-                logger.info("Admin user already exists")
     except Exception as e:
-        logger.warning("Could not seed admin/super_admin user: %s", str(e))
+        logger.warning("Could not seed development admin user: %s", str(e))
+
 
 
 
@@ -131,7 +123,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggerMiddleware)
+
 
 # ── Exception Handlers ────────────────────────────────────────────────────
 register_exception_handlers(app)

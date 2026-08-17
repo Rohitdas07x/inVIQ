@@ -89,10 +89,11 @@ def db():
     session.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def client():
-    c = TestClient(app)
-    yield c
+    with TestClient(app) as c:
+        yield c
+
 
 
 @pytest.fixture(scope="function")
@@ -105,6 +106,7 @@ def test_user(db):
             hashed_password=hash_password("testpass123"),
             full_name="Test User",
             role="staff",
+            org_id=1,
             is_active=True,
             is_verified=True,
         )
@@ -115,8 +117,9 @@ def test_user(db):
         # Reset lockout state between tests to prevent accumulation
         user.login_attempts = 0
         user.locked_until = None
+        user.org_id = 1
         db.commit()
-    return {"username": "testuser", "password": "testpass123", "user": user}
+    return {"username": "testuser", "password": "testpass123", "email": user.email, "user": user}
 
 
 @pytest.fixture(scope="function")
@@ -129,13 +132,19 @@ def admin_user(db):
             hashed_password=hash_password("adminpass123"),
             full_name="Test Admin",
             role="admin",
+            org_id=1,
             is_active=True,
             is_verified=True,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-    return {"username": "testadmin", "password": "adminpass123", "user": user}
+    else:
+        user.org_id = 1
+        db.commit()
+    return {"username": "testadmin", "password": "adminpass123", "email": user.email, "user": user}
+
+
 
 
 def get_auth_header(client, email_or_username: str, password: str) -> dict:
@@ -155,7 +164,8 @@ def get_auth_header(client, email_or_username: str, password: str) -> dict:
             "password": password,
         },
     )
-    token = response.json()["data"]["access_token"]
+    token = response.cookies.get("access_token") or response.json().get("data", {}).get("access_token")
     return {"Authorization": f"Bearer {token}"}
+
 
 

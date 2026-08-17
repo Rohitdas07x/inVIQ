@@ -21,6 +21,8 @@ from typing import Optional
 import strawberry
 from strawberry.types import Info
 
+from app.core.exceptions import AuthorizationError
+from app.infrastructure.database.models import User
 from app.application.analytics_service import AnalyticsService
 from app.application.cache_service import (
     cache_get,
@@ -53,12 +55,24 @@ logger = logging.getLogger("smart_inventory.graphql")
 _PRIVILEGED_ROLES = {"admin", "super_admin"}
 
 
+def _resolve_caller_org_id(user: Optional[User]) -> Optional[int]:
+    """Resolve caller org_id. If non-super_admin has org_id=None, deny access."""
+    if user is None:
+        return None
+    if getattr(user, "role", None) == "super_admin":
+        return None
+    if getattr(user, "org_id", None) is None:
+        raise AuthorizationError("User is not assigned to an organization")
+    return user.org_id
+
+
 def _is_privileged(user) -> bool:
     """Return True when the caller is admin-level or above."""
 
     if user is None:
         return False
     return user.role in _PRIVILEGED_ROLES
+
 
 
 def _to_stock_health_item(raw, privileged: bool) -> StockHealthItem:
@@ -128,12 +142,14 @@ class Query:
     def dashboard_stats(self, info: Info) -> DashboardStats:
         ctx = info.context
         db = ctx["db"]
+        user = ctx.get("user")
+        org_id = _resolve_caller_org_id(user)
 
-        cache_key = "analytics:dashboard_stats"
+        cache_key = f"analytics:dashboard_stats:{org_id}:None:None"
         cached = cache_get(cache_key)
 
         if cached is None:
-            raw = AnalyticsService.get_dashboard_stats(db)
+            raw = AnalyticsService.get_dashboard_stats(db, org_id=org_id)
             cache_set(cache_key, raw, ttl=DASHBOARD_TTL)
             data = raw["data"]
         else:
@@ -174,24 +190,22 @@ class Query:
     def heatmap(self, info: Info) -> HeatmapData:
         ctx = info.context
         db = ctx["db"]
-        user = ctx["user"]
+        user = ctx.get("user")
         privileged = _is_privileged(user)
+        org_id = _resolve_caller_org_id(user)
 
-        cache_key = "analytics:heatmap"
+        cache_key = f"analytics:heatmap:{org_id}"
         cached = cache_get(cache_key)
 
         if cached is None:
-            raw = AnalyticsService.get_heatmap(db)
+            raw = AnalyticsService.get_heatmap(db, org_id=org_id)
             cache_set(cache_key, raw, ttl=ANALYTICS_TTL)
             data = raw["data"]
         else:
             data = cached["data"]
 
         # Re-fetch the raw DB rows to build typed detail objects with masking.
-        # The cache holds the REST dict format; we read the live rows for type safety.
-        # This is a lightweight re-query since the DB result is already cached in Redis
-        # for other callers — only the Strawberry mapping runs here.
-        raw_rows = get_latest_stock_health(db)
+        raw_rows = get_latest_stock_health(db, org_id=org_id)
         details = [_to_stock_health_item(r, privileged) for r in raw_rows]
 
         return HeatmapData(
@@ -219,14 +233,15 @@ class Query:
 
         ctx = info.context
         db = ctx["db"]
-        user = ctx["user"]
+        user = ctx.get("user")
         privileged = _is_privileged(user)
+        org_id = _resolve_caller_org_id(user)
 
-        cache_key = f"analytics:alerts:{severity}"
+        cache_key = f"analytics:alerts:{org_id}:{severity}"
         cached = cache_get(cache_key)
 
         if cached is None:
-            raw = AnalyticsService.get_alerts(db, severity)
+            raw = AnalyticsService.get_alerts(db, severity, org_id=org_id)
             cache_set(cache_key, raw, ttl=ANALYTICS_TTL)
             data = raw["data"]
         else:
@@ -247,12 +262,14 @@ class Query:
     def summary(self, info: Info) -> SummaryData:
         ctx = info.context
         db = ctx["db"]
+        user = ctx.get("user")
+        org_id = _resolve_caller_org_id(user)
 
-        cache_key = "analytics:summary"
+        cache_key = f"analytics:summary:{org_id}"
         cached = cache_get(cache_key)
 
         if cached is None:
-            raw = AnalyticsService.get_summary(db)
+            raw = AnalyticsService.get_summary(db, org_id=org_id)
             cache_set(cache_key, raw, ttl=ANALYTICS_TTL)
             data = raw["data"]
         else:
@@ -313,13 +330,14 @@ class Query:
         """
         ctx = info.context
         db = ctx["db"]
-        user = ctx["user"]
+        user = ctx.get("user")
         privileged = _is_privileged(user)
+        org_id = _resolve_caller_org_id(user)
 
         if status_filter and status_filter not in ("CRITICAL", "WARNING", "HEALTHY"):
             raise ValueError("statusFilter must be '', 'CRITICAL', 'WARNING', or 'HEALTHY'")
 
-        rows = get_latest_stock_health(db)
+        rows = get_latest_stock_health(db, org_id=org_id)
 
         if location:
             rows = [r for r in rows if location.lower() in r.location_name.lower()]

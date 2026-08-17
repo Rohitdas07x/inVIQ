@@ -12,6 +12,8 @@ import logging
 import uuid
 from typing import List, Dict, Any, Optional
 import httpx
+import time
+
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -140,6 +142,8 @@ class VectorMemory:
         role: str,
         content: str,
         timestamp: datetime = None,
+        org_id: Optional[int] = None,
+        user_id: Optional[int] = None,
     ) -> None:
         if not self._available or not content or not content.strip():
             return
@@ -168,6 +172,8 @@ class VectorMemory:
                             "role": role,
                             "timestamp": ts_str,
                             "content": content,
+                            "org_id": org_id,
+                            "user_id": user_id,
                         },
                     )
                 ],
@@ -176,14 +182,19 @@ class VectorMemory:
             logger.warning("Failed to store message in vector memory: %s", e)
 
     def search_relevant(
-        self, query: str, n_results: int = 5, exclude_session: str = None
+        self,
+        query: str,
+        n_results: int = 5,
+        exclude_session: str = None,
+        org_id: Optional[int] = None,
+        user_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         clean_q = (query or "").strip()
 
         if not self._available or not clean_q:
             return []
 
-        cache_key = f"{clean_q}:{n_results}:{exclude_session}"
+        cache_key = f"{clean_q}:{n_results}:{exclude_session}:{org_id}:{user_id}"
         now = time.time()
         if hasattr(self, "_search_cache"):
             cached = self._search_cache.get(cache_key)
@@ -195,11 +206,25 @@ class VectorMemory:
         try:
             vector = self._embed(clean_q)
 
+            # Build Qdrant payload filter for tenant isolation
+            from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+            conditions = []
+            if org_id is not None:
+                conditions.append(
+                    FieldCondition(key="org_id", match=MatchValue(value=org_id))
+                )
+            if user_id is not None:
+                conditions.append(
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id))
+                )
+            query_filter = Filter(must=conditions) if conditions else None
+
             response = self._client.query_points(
                 collection_name=self._collection,
                 query=vector,
                 limit=n_results * 2 if exclude_session else n_results,
                 with_payload=True,
+                query_filter=query_filter,
             )
 
             matches = []

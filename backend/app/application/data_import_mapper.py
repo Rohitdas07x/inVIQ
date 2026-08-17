@@ -227,24 +227,25 @@ class DataImportMapper:
         assigned_targets = set()
 
         synonyms: Dict[str, List[str]] = {
-            "name": ["item_name", "item", "product", "medicine", "drug", "title", "location_name", "location", "facility"],
-            "item_name": ["item_name", "item", "product_name", "product", "medicine", "drug_name", "drug"],
-            "location_name": ["location_name", "location", "facility", "warehouse", "clinic", "hospital"],
+            "name": ["item_name", "itemname", "item", "product", "medicine", "drug", "title", "location_name", "location", "facility"],
+            "item_name": ["item_name", "itemname", "item", "product_name", "productname", "product", "medicine_name", "medicine", "drug_name", "drug"],
+            "location_name": ["location_name", "locationname", "location", "facility", "warehouse", "clinic", "hospital", "branch"],
             "category": ["category", "cat", "class", "group", "type"],
             "unit": ["unit", "uom", "package", "pack", "measure"],
             "lead_time_days": ["lead_time", "leadtime", "days_lead", "delivery_days"],
-            "min_stock": ["min_stock", "min_qty", "threshold", "minimum_stock", "reorder_level"],
-            "storage_temp": ["storage_temp", "temp", "temperature", "cold_chain", "storage"],
-            "received": ["received", "qty_received", "quantity_received", "inbound", "qty_in", "in", "quantity", "qty"],
-            "issued": ["issued", "qty_issued", "quantity_issued", "outbound", "qty_out", "out", "dispensed"],
-            "date": ["date", "transaction_date", "tx_date", "delivery_date", "entry_date"],
-            "batch_number": ["batch_number", "batch_no", "batch", "lot_number", "lot_no", "lot"],
-            "expiry_date": ["expiry_date", "exp_date", "expiry", "exp", "expiration_date"],
+            "min_stock": ["min_stock", "minstock", "min_qty", "threshold", "minimum_stock", "reorder_level"],
+            "storage_temp": ["storage_temp", "storagetemp", "temp", "temperature", "cold_chain", "storage"],
+            "received": ["received", "received_qty", "receivedqty", "qty_received", "quantity_received", "quantityreceived", "inbound", "qty_in", "in", "quantity", "qty"],
+            "issued": ["issued", "issued_qty", "issuedqty", "qty_issued", "quantity_issued", "quantityissued", "outbound", "qty_out", "out", "dispensed"],
+            "date": ["date", "transaction_date", "transactiondate", "tx_date", "txdate", "delivery_date", "entry_date"],
+            "batch_number": ["batch_number", "batchnumber", "batch_no", "batchno", "batch", "lot_number", "lotnumber", "lot_no", "lot"],
+            "expiry_date": ["expiry_date", "expirydate", "exp_date", "expdate", "expiry", "exp", "expiration_date", "expirationdate"],
             "notes": ["notes", "note", "remarks", "comment", "description"],
             "region": ["region", "zone", "state", "area", "district"],
             "address": ["address", "street", "city"],
             "type": ["type", "loc_type", "facility_type"],
         }
+
 
         for header in headers:
             norm_header = re.sub(r"[^a-z0-9]", "", header.lower())
@@ -259,7 +260,7 @@ class DataImportMapper:
                     confidence = 1.0
                     break
 
-            # 2. Synonym match
+            # 2. Exact synonym match (Pass 1)
             if not matched_target:
                 for target_field, syn_list in synonyms.items():
                     if target_field not in schema:
@@ -270,12 +271,23 @@ class DataImportMapper:
                             matched_target = target_field
                             confidence = 0.95
                             break
-                        elif norm_syn in norm_header or norm_header in norm_syn:
+                    if matched_target:
+                        break
+
+            # 3. Partial/substring synonym match (Pass 2 - only if no exact match found)
+            if not matched_target:
+                for target_field, syn_list in synonyms.items():
+                    if target_field not in schema:
+                        continue
+                    for syn in syn_list:
+                        norm_syn = re.sub(r"[^a-z0-9]", "", syn)
+                        if len(norm_syn) >= 3 and (norm_syn in norm_header or norm_header in norm_syn):
                             matched_target = target_field
                             confidence = 0.75
                             break
                     if matched_target:
                         break
+
 
             if matched_target and matched_target not in assigned_targets:
                 mappings[header] = {

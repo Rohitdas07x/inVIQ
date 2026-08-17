@@ -54,29 +54,25 @@ class ReportService:
 
     # ── Inventory & Low-Stock ────────────────────────────────────────────
 
-    def get_stock_rows(self, location_id: Optional[int] = None) -> List[StockRow]:
+    def get_stock_rows(
+        self,
+        location_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+    ) -> List[StockRow]:
         """
-        Return the latest closing stock for every item.
+        Return the latest closing stock for every item scoped to the organization.
 
         Uses a subquery to select the most-recent transaction date per item,
         then joins back to get the closing_stock on that date.
-
-        Args:
-            location_id: Optional filter. If supplied, only transactions from
-                         that location are considered.
-
-        Returns:
-            List of dicts with keys:
-                name, category, unit, current_stock, min_stock
         """
-        latest_sub = (
-            self._db.query(
-                InventoryTransaction.item_id,
-                func.max(InventoryTransaction.date).label("max_date"),
-            )
-            .group_by(InventoryTransaction.item_id)
-            .subquery()
+        subquery = self._db.query(
+            InventoryTransaction.item_id,
+            func.max(InventoryTransaction.date).label("max_date"),
         )
+        if location_id is not None:
+            subquery = subquery.filter(InventoryTransaction.location_id == location_id)
+
+        latest_sub = subquery.group_by(InventoryTransaction.item_id).subquery()
 
         q = (
             self._db.query(
@@ -95,6 +91,8 @@ class ReportService:
         )
         if location_id is not None:
             q = q.filter(InventoryTransaction.location_id == location_id)
+        if org_id is not None:
+            q = q.filter(Item.org_id == org_id)
 
         rows = q.all()
         return [
@@ -108,13 +106,17 @@ class ReportService:
             for r in rows
         ]
 
-    def get_low_stock_rows(self, location_id: Optional[int] = None) -> List[StockRow]:
+    def get_low_stock_rows(
+        self,
+        location_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+    ) -> List[StockRow]:
         """
         Same as get_stock_rows() but filtered to items at or below min_stock.
         """
         return [
             r
-            for r in self.get_stock_rows(location_id=location_id)
+            for r in self.get_stock_rows(location_id=location_id, org_id=org_id)
             if r["current_stock"] <= r["min_stock"]
         ]
 
@@ -126,20 +128,10 @@ class ReportService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         limit: int = 200,
+        org_id: Optional[int] = None,
     ) -> List[TransactionRow]:
         """
-        Return recent inventory transactions with location and item names.
-
-        Args:
-            location_id: Optional filter by location.
-            date_from:   Optional ISO date string (YYYY-MM-DD) — inclusive lower bound.
-            date_to:     Optional ISO date string (YYYY-MM-DD) — inclusive upper bound.
-            limit:       Maximum rows returned (default 200).
-
-        Returns:
-            List of dicts with keys:
-                date, location, item, opening_stock, received,
-                issued, closing_stock, entered_by
+        Return recent inventory transactions with location and item names, scoped to org_id.
         """
         q = (
             self._db.query(
@@ -157,6 +149,8 @@ class ReportService:
         )
         if location_id is not None:
             q = q.filter(InventoryTransaction.location_id == location_id)
+        if org_id is not None:
+            q = q.filter(Location.org_id == org_id)
         if date_from:
             q = q.filter(InventoryTransaction.date >= date_from)
         if date_to:
@@ -184,19 +178,10 @@ class ReportService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         limit: int = 100,
+        org_id: Optional[int] = None,
     ) -> List[RequisitionRow]:
         """
-        Return requisitions ordered by creation date descending.
-
-        Args:
-            date_from: Optional inclusive lower date bound (YYYY-MM-DD).
-            date_to:   Optional inclusive upper date bound (YYYY-MM-DD).
-            limit:     Maximum rows returned (default 100).
-
-        Returns:
-            List of dicts with keys:
-                requisition_number, department, requested_by, urgency,
-                status, created_at, approved_by
+        Return requisitions ordered by creation date descending, scoped to org_id.
         """
         q = self._db.query(
             Requisition.requisition_number,
@@ -207,6 +192,8 @@ class ReportService:
             Requisition.created_at,
             Requisition.approved_by,
         )
+        if org_id is not None:
+            q = q.filter(Requisition.org_id == org_id)
         if date_from:
             q = q.filter(Requisition.created_at >= date_from)
         if date_to:
@@ -230,20 +217,19 @@ class ReportService:
         self,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        org_id: Optional[int] = None,
     ) -> RequisitionStats:
         """
         Return aggregated requisition counts for the summary table.
-
-        Returns:
-            Dict with keys: total, pending, approved, rejected
         """
-        rows = self.get_requisition_rows(date_from=date_from, date_to=date_to)
+        rows = self.get_requisition_rows(date_from=date_from, date_to=date_to, org_id=org_id)
         return {
             "total": len(rows),
             "pending": sum(1 for r in rows if r["status"] == "PENDING"),
             "approved": sum(1 for r in rows if r["status"] == "APPROVED"),
             "rejected": sum(1 for r in rows if r["status"] == "REJECTED"),
         }
+
 
 
 # ---------------------------------------------------------------------------

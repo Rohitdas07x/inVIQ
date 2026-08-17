@@ -338,9 +338,9 @@ class DataImportService:
         item_cache: Dict[str, Item] = {}
         location_cache: Dict[str, Location] = {}
         if job.target_entity == "inventory_transaction":
-            for it in self.inv_repo.get_all_items():
+            for it in self.inv_repo.get_all_items(org_id=job.org_id):
                 item_cache[it.name.lower()] = it
-            for loc in self.inv_repo.get_all_locations():
+            for loc in self.inv_repo.get_all_locations(org_id=job.org_id):
                 location_cache[loc.name.lower()] = loc
 
         success_count = 0
@@ -450,7 +450,7 @@ class DataImportService:
                 item_name = str(data.get("item_name", "")).strip()
                 matched_item = item_cache.get(item_name.lower())
                 if not matched_item:
-                    # Auto-create item if it doesn't exist
+                    # Auto-create item within caller organization if it doesn't exist
                     matched_item = self.inv_repo.create_item(
                         name=item_name,
                         category="general",
@@ -458,6 +458,7 @@ class DataImportService:
                         lead_time_days=7,
                         min_stock=10,
                         storage_temp="ambient",
+                        org_id=job.org_id,
                     )
                     item_cache[item_name.lower()] = matched_item
                 item_id = matched_item.id
@@ -472,13 +473,14 @@ class DataImportService:
                         name=loc_name,
                         type="warehouse",
                         region="Default",
+                        org_id=job.org_id,
                     )
                     location_cache[loc_name.lower()] = matched_loc
                 location_id = matched_loc.id
 
             if not location_id:
-                # Fallback to first available location in system
-                all_locs = self.inv_repo.get_all_locations()
+                # Fallback to first available location in caller organization
+                all_locs = self.inv_repo.get_all_locations(org_id=job.org_id)
                 if all_locs:
                     location_id = all_locs[0].id
                 else:
@@ -486,6 +488,7 @@ class DataImportService:
                         name="Main Facility",
                         type="warehouse",
                         region="Default",
+                        org_id=job.org_id,
                     )
                     location_id = new_loc.id
 
@@ -503,7 +506,7 @@ class DataImportService:
             )
 
         elif target == "item":
-            existing = self.inv_repo.get_item_by_name(data["name"])
+            existing = self.inv_repo.get_item_by_name(data["name"], org_id=job.org_id)
             if existing:
                 existing.category = data.get("category", existing.category)
                 existing.unit = data.get("unit", existing.unit)
@@ -524,7 +527,7 @@ class DataImportService:
                 self.db.add(new_item)
 
         elif target == "location":
-            existing = self.inv_repo.get_location_by_name(data["name"])
+            existing = self.inv_repo.get_location_by_name(data["name"], org_id=job.org_id)
             if existing:
                 existing.type = data.get("type", existing.type)
                 existing.region = data.get("region", existing.region)
@@ -539,3 +542,4 @@ class DataImportService:
                     address=data.get("address"),
                 )
                 self.db.add(new_loc)
+

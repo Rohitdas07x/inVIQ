@@ -48,3 +48,29 @@ class TestSupplierManagement:
         del_res = client.delete(f"/api/admin/suppliers/{supplier_id}", headers=headers)
         assert del_res.status_code == 200
         assert del_res.json()["success"] is True
+
+    def test_create_supplier_without_password_generates_temporary_password(self, client, admin_user):
+        headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+        payload = {
+            "name": "Auto Pass Distributors",
+            "username": "autopass_vendor",
+            "email": "autopass@pharma.com",
+        }
+        res = client.post("/api/admin/suppliers", json=payload, headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert "temporary_password" in data["data"]
+        assert len(data["data"]["temporary_password"]) >= 12
+
+    def test_create_supplier_with_weak_password_fails(self, client, admin_user):
+        headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+        payload = {
+            "name": "Weak Pass Agency",
+            "username": "weak_vendor",
+            "email": "weak@pharma.com",
+            "password": "123",  # Too short
+        }
+        res = client.post("/api/admin/suppliers", json=payload, headers=headers)
+        assert res.status_code in [400, 422]
+

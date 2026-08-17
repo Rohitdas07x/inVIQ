@@ -48,18 +48,21 @@ class AuditRepository:
             logger.error("Database error creating audit log: %s", str(e))
             raise DatabaseError(f"Failed to create audit log: {str(e)}")
 
-    def get_recent(self, limit: int = 100) -> List[AuditLog]:
-        """Get most recent audit logs."""
+    def get_recent(self, org_id: Optional[int] = None, limit: int = 100) -> List[AuditLog]:
+        """Get most recent audit logs, optionally scoped by organization."""
         try:
+            query = self.db.query(AuditLog)
+            if org_id is not None:
+                query = query.filter(AuditLog.org_id == org_id)
             return (
-                self.db.query(AuditLog)
-                .order_by(AuditLog.created_at.desc())
+                query.order_by(AuditLog.created_at.desc())
                 .limit(limit)
                 .all()
             )
         except SQLAlchemyError as e:
             logger.error("Database error getting recent audit logs: %s", str(e))
             raise DatabaseError(f"Failed to get recent audit logs: {str(e)}")
+
 
     def get_by_user(self, username: str, limit: int = 100) -> List[AuditLog]:
         """Get audit logs for a specific user."""

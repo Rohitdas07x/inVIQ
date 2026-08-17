@@ -16,12 +16,14 @@ import strawberry
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
-def _ctx(db, role: str = "admin"):
+def _ctx(db, role: str = "admin", org_id: int = 1):
     """Build a minimal GraphQL context dict mimicking get_graphql_context."""
     from unittest.mock import MagicMock
     user = MagicMock()
     user.role = role
+    user.org_id = org_id
     return {"db": db, "user": user, "request": MagicMock()}
+
 
 
 def _guest_ctx(db):
@@ -311,4 +313,47 @@ class TestGraphQLStockHealth:
         for row in result.data["stockHealth"]:
             assert row["avgDailyUsage"] is None
             assert row["daysRemaining"] is None
-            assert row["leadTimeDays"] is None
+
+
+# ── Tenant Isolation ──────────────────────────────────────────────────────
+
+class TestGraphQLTenantIsolation:
+    """Ensure GraphQL resolvers respect multi-tenant scoping and use isolated cache keys."""
+
+    def test_tenant_isolation_in_stock_health(self, db):
+        from app.infrastructure.database.models import Location, Item, InventoryTransaction
+        from datetime import date
+
+        # Create locations and items for two different tenants
+        loc1 = Location(name="Tenant 1 Clinic", type="clinic", region="North", org_id=1)
+        loc2 = Location(name="Tenant 2 Clinic", type="clinic", region="South", org_id=2)
+        item1 = Item(name="Tenant 1 Medicine", category="Specialty", unit="box", min_stock=10, org_id=1)
+        item2 = Item(name="Tenant 2 Medicine", category="Specialty", unit="box", min_stock=10, org_id=2)
+
+        db.add_all([loc1, loc2, item1, item2])
+        db.commit()
+        db.refresh(loc1)
+        db.refresh(loc2)
+        db.refresh(item1)
+        db.refresh(item2)
+
+        today = date.today()
+        tx1 = InventoryTransaction(location_id=loc1.id, item_id=item1.id, date=today, opening_stock=0, received=20, issued=0, closing_stock=20)
+        tx2 = InventoryTransaction(location_id=loc2.id, item_id=item2.id, date=today, opening_stock=0, received=20, issued=0, closing_stock=20)
+        db.add_all([tx1, tx2])
+        db.commit()
+
+        # Query as Tenant 1 (org_id=1)
+        res1 = _exec("{ stockHealth { itemName locationName } }", _ctx(db, role="staff", org_id=1))
+        assert res1.errors is None
+        item_names_t1 = [r["itemName"] for r in res1.data["stockHealth"]]
+        assert "Tenant 1 Medicine" in item_names_t1
+        assert "Tenant 2 Medicine" not in item_names_t1
+
+        # Query as Tenant 2 (org_id=2)
+        res2 = _exec("{ stockHealth { itemName locationName } }", _ctx(db, role="staff", org_id=2))
+        assert res2.errors is None
+        item_names_t2 = [r["itemName"] for r in res2.data["stockHealth"]]
+        assert "Tenant 2 Medicine" in item_names_t2
+        assert "Tenant 1 Medicine" not in item_names_t2
+

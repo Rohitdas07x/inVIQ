@@ -1,23 +1,29 @@
 """
 Analytics API routes — heatmap, alerts, summary, dashboard stats.
 
-All GET endpoints are publicly accessible for Guest Demo Mode.
-Authenticated users and guests receive identical data (no personalisation here).
-Cache is invalidated when inventory data changes.
+All responses are org-scoped: non-super_admin users see only their own
+organization's inventory data. Cache keys include org_id to prevent
+cross-tenant cache poisoning.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy.orm import Session
 from app.infrastructure.database.connection import get_db
 from app.application.analytics_service import AnalyticsService
 from app.application.cache_service import cache_get, cache_set, ANALYTICS_TTL, DASHBOARD_TTL
 from app.core.exceptions import ValidationError
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_caller_org_id
 from app.core.rate_limiter import limiter
 from app.infrastructure.database.models import User
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+
+def _caller_org_id(user: User) -> Optional[int]:
+    """Return org_id for tenant-scoped operations using central dependency rule."""
+    return get_caller_org_id(user)
+
 
 
 @router.get("/heatmap")
@@ -27,12 +33,13 @@ def get_heatmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cache_key = "analytics:heatmap"
+    org_id = _caller_org_id(current_user)
+    cache_key = f"analytics:heatmap:{org_id}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    result = AnalyticsService.get_heatmap(db)
+    result = AnalyticsService.get_heatmap(db, org_id=org_id)
     cache_set(cache_key, result, ttl=ANALYTICS_TTL)
     return result
 
@@ -48,12 +55,13 @@ def get_alerts(
     if severity not in ["CRITICAL", "WARNING"]:
         raise ValidationError("Severity must be CRITICAL or WARNING")
 
-    cache_key = f"analytics:alerts:{severity}"
+    org_id = _caller_org_id(current_user)
+    cache_key = f"analytics:alerts:{org_id}:{severity}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    result = AnalyticsService.get_alerts(db, severity)
+    result = AnalyticsService.get_alerts(db, severity, org_id=org_id)
     cache_set(cache_key, result, ttl=ANALYTICS_TTL)
     return result
 
@@ -65,17 +73,16 @@ def get_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cache_key = "analytics:summary"
+    org_id = _caller_org_id(current_user)
+    cache_key = f"analytics:summary:{org_id}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    result = AnalyticsService.get_summary(db)
+    result = AnalyticsService.get_summary(db, org_id=org_id)
     cache_set(cache_key, result, ttl=ANALYTICS_TTL)
     return result
 
-
-from fastapi import APIRouter, Depends, Request, Query
 
 @router.get("/dashboard/stats")
 @limiter.limit("30/minute")
@@ -86,7 +93,7 @@ def get_dashboard_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    org_id = current_user.org_id if current_user.role != "super_admin" else None
+    org_id = _caller_org_id(current_user)
     cache_key = f"analytics:dashboard_stats:{org_id}:{location_id}:{category}"
     cached = cache_get(cache_key)
     if cached is not None:
@@ -100,4 +107,3 @@ def get_dashboard_stats(
     )
     cache_set(cache_key, result, ttl=DASHBOARD_TTL)
     return result
-

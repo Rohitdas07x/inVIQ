@@ -13,8 +13,8 @@ class TestRequisitionCreate:
         """Create requisition should succeed with valid data."""
         from app.infrastructure.database.models import Location, Item
         
-        location = Location(name="Req Location", type="clinic", region="Test")
-        item = Item(name="Req Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Req Location", type="clinic", region="Test")
+        item = Item(org_id=1, name="Req Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)
@@ -43,8 +43,8 @@ class TestRequisitionCreate:
         """Create requisition with invalid urgency should fail."""
         from app.infrastructure.database.models import Location, Item
         
-        location = Location(name="Req Location 2", type="clinic", region="Test")
-        item = Item(name="Req Item 2", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Req Location 2", type="clinic", region="Test")
+        item = Item(org_id=1, name="Req Item 2", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)
@@ -61,7 +61,61 @@ class TestRequisitionCreate:
             },
             headers=headers,
         )
-        assert response.status_code in [400, 422]
+        assert response.status_code == 422
+
+    def test_create_requisition_cross_tenant_location_rejected(self, client, test_user, db):
+        """Creating a requisition targeting another tenant's location must be rejected (403)."""
+        from app.infrastructure.database.models import Location, Item
+
+        other_loc = Location(name="Other Tenant Clinic", type="clinic", region="Test", org_id=99)
+        item = Item(name="Common Medicine", category="medicine", unit="box", org_id=1)
+        db.add_all([other_loc, item])
+        db.commit()
+        db.refresh(other_loc)
+        db.refresh(item)
+
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+        response = client.post(
+            "/api/requisition/create",
+            json={
+                "location_id": other_loc.id,
+                "department": "Pharmacy",
+                "urgency": "NORMAL",
+                "items": [{"item_id": item.id, "quantity": 10}],
+            },
+            headers=headers,
+        )
+        assert response.status_code == 403
+        data = response.json()
+        err_msg = data.get("error", {}).get("message", "") or data.get("detail", "")
+        assert "organization" in err_msg.lower()
+
+    def test_create_requisition_cross_tenant_item_rejected(self, client, test_user, db):
+        """Creating a requisition containing another tenant's item must be rejected (403)."""
+        from app.infrastructure.database.models import Location, Item
+
+        loc = Location(name="My Clinic", type="clinic", region="Test", org_id=1)
+        other_item = Item(name="Other Tenant Drug", category="medicine", unit="box", org_id=99)
+        db.add_all([loc, other_item])
+        db.commit()
+        db.refresh(loc)
+        db.refresh(other_item)
+
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+        response = client.post(
+            "/api/requisition/create",
+            json={
+                "location_id": loc.id,
+                "department": "Pharmacy",
+                "urgency": "NORMAL",
+                "items": [{"item_id": other_item.id, "quantity": 10}],
+            },
+            headers=headers,
+        )
+        assert response.status_code == 403
+        data = response.json()
+        err_msg = data.get("error", {}).get("message", "") or data.get("detail", "")
+        assert "organization" in err_msg.lower()
 
     def test_create_requisition_unauthenticated(self, client):
         """Create requisition without auth should fail."""
@@ -120,8 +174,8 @@ class TestRequisitionDetails:
         """Get requisition details should return full data."""
         from app.infrastructure.database.models import Location, Item, Requisition, RequisitionItem
         
-        location = Location(name="Detail Location", type="clinic", region="Test")
-        item = Item(name="Detail Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Detail Location", type="clinic", region="Test")
+        item = Item(org_id=1, name="Detail Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)
@@ -181,8 +235,8 @@ class TestRequisitionApproval:
         from app.infrastructure.database.models import Location, Item, Requisition, RequisitionItem, InventoryTransaction
         from datetime import date
         
-        location = Location(name="Approve Location", type="clinic", region="Test")
-        item = Item(name="Approve Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Approve Location", type="clinic", region="Test")
+        item = Item(org_id=1, name="Approve Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)
@@ -240,8 +294,8 @@ class TestRequisitionRejection:
         """Reject requisition should succeed for admin."""
         from app.infrastructure.database.models import Location, Item, Requisition, RequisitionItem
         
-        location = Location(name="Reject Location", type="clinic", region="Test")
-        item = Item(name="Reject Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Reject Location", type="clinic", region="Test")
+        item = Item(org_id=1, name="Reject Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)

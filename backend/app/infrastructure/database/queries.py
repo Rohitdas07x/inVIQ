@@ -91,6 +91,7 @@ def get_latest_stock_health(
 
     if org_id is not None:
         query = query.filter(Item.org_id == org_id)
+
     if location_id is not None:
         query = query.filter(Location.id == location_id)
     if category is not None and category != "ALL":
@@ -100,9 +101,9 @@ def get_latest_stock_health(
 
 
 
-def get_critical_alerts(db: Session, severity: str = "CRITICAL"):
-    """Get items with critical or warning stock levels"""
-    stock_health = get_latest_stock_health(db)
+def get_critical_alerts(db: Session, severity: str = "CRITICAL", org_id: Optional[int] = None):
+    """Get items with critical or warning stock levels, scoped to org if provided."""
+    stock_health = get_latest_stock_health(db, org_id=org_id)
 
     if severity == "CRITICAL":
         return [item for item in stock_health if item.health_status == "CRITICAL"]
@@ -112,9 +113,9 @@ def get_critical_alerts(db: Session, severity: str = "CRITICAL"):
         return stock_health
 
 
-def get_heatmap_data(db: Session):
-    """Get stock health data formatted for heatmap visualization"""
-    stock_health = get_latest_stock_health(db)
+def get_heatmap_data(db: Session, org_id: Optional[int] = None):
+    """Get stock health data formatted for heatmap visualization, scoped to org if provided."""
+    stock_health = get_latest_stock_health(db, org_id=org_id)
 
     # Extract unique locations and items
     locations = sorted(set(item.location_name for item in stock_health))

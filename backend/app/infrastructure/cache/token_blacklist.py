@@ -88,3 +88,48 @@ def is_token_blacklisted(token: str) -> bool:
 def blacklist_refresh_token(token: str) -> None:
     """Blacklist a refresh token (longer TTL)."""
     blacklist_token(token, expires_in_minutes=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60)
+
+
+# ── Single-use password reset JTI store ───────────────────────────────────
+_RESET_PREFIX = "pw_reset_jti:"
+_memory_reset_jtis: dict[str, float] = {}  # jti -> expiry_epoch (in-memory fallback)
+
+
+def register_reset_jti(jti: str, ttl_seconds: int = 3600) -> None:
+    """Store a password-reset JTI so we can single-use it."""
+    r = get_redis()
+    if r and is_redis_available():
+        try:
+            r.setex(f"{_RESET_PREFIX}{jti}", ttl_seconds, "1")
+            return
+        except Exception as e:
+            logger.warning("Redis reset JTI write failed: %s", e)
+    # Fallback to in-memory
+    _memory_reset_jtis[jti] = time.time() + ttl_seconds
+
+
+def consume_reset_jti(jti: str) -> bool:
+    """Check if a JTI exists and delete it atomically (single-use).
+
+    Returns True if the JTI was found and consumed; False if already used or not found.
+    """
+    r = get_redis()
+    if r and is_redis_available():
+        try:
+            key = f"{_RESET_PREFIX}{jti}"
+            # Redis DEL returns number of keys deleted — atomic check-and-delete
+            deleted = r.delete(key)
+            return deleted > 0
+        except Exception as e:
+            logger.warning("Redis reset JTI consume failed: %s", e)
+    # Fallback to in-memory
+    now = time.time()
+    # Purge expired entries
+    expired = [k for k, exp in _memory_reset_jtis.items() if exp < now]
+    for k in expired:
+        _memory_reset_jtis.pop(k, None)
+    if jti in _memory_reset_jtis:
+        _memory_reset_jtis.pop(jti)
+        return True
+    return False
+

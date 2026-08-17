@@ -66,7 +66,12 @@ def _get_conversation_history(db: Session, conversation_id: str, limit: int = 10
     return [{"role": msg.role, "content": msg.content} for msg in recent]
 
 
-def _get_vector_context(question: str, conversation_id: str = "") -> tuple[str, float]:
+def _get_vector_context(
+    question: str,
+    conversation_id: str = "",
+    org_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+) -> tuple[str, float]:
     """Retrieve relevant past context from vector memory with execution duration in ms."""
     t0 = time.perf_counter()
     try:
@@ -78,6 +83,8 @@ def _get_vector_context(question: str, conversation_id: str = "") -> tuple[str, 
             query=question,
             n_results=3,
             exclude_session=conversation_id or None,
+            org_id=org_id,
+            user_id=user_id,
         )
 
         if not matches:
@@ -109,14 +116,21 @@ def _is_greeting(text: str) -> bool:
 
 
 def _build_agent_response(
-    question: str, db: Session, conversation_id: Optional[str] = None
+    question: str,
+    db: Session,
+    conversation_id: Optional[str] = None,
+    org_id: Optional[int] = None,
+    user_id: Optional[int] = None,
 ) -> dict:
     """Try LLM agent first, fall back to rule-based if unavailable."""
     rag_start = time.perf_counter()
-    set_db_session(db)
+    set_db_session(db, org_id=org_id)
+
 
     # Stage 1: Vector Retrieval Timing
-    past_context, vector_retrieval_ms = _get_vector_context(question, conversation_id or "")
+    past_context, vector_retrieval_ms = _get_vector_context(
+        question, conversation_id or "", org_id=org_id, user_id=user_id
+    )
     history = []
     if conversation_id:
         history = _get_conversation_history(db, conversation_id, limit=6)
@@ -276,14 +290,24 @@ def chat_query(
     if not chat_request.question or len(chat_request.question.strip()) < 3:
         raise ValidationError("Question must be at least 3 characters")
 
+    # Non-super_admins must be assigned to an organization
+    if current_user.role != "super_admin" and current_user.org_id is None:
+        raise AuthorizationError("User is not assigned to an organization")
+
     # Verify ownership if continuing an existing conversation
     if chat_request.conversation_id:
         _verify_session_ownership(db, chat_request.conversation_id, current_user.id)
 
     try:
+        caller_org_id = None if current_user.role == "super_admin" else current_user.org_id
         result = _build_agent_response(
-            chat_request.question, db, chat_request.conversation_id or ""
+            chat_request.question,
+            db,
+            chat_request.conversation_id or "",
+            org_id=caller_org_id,
+            user_id=current_user.id,
         )
+
 
         conv_id = chat_request.conversation_id
         if not conv_id:
@@ -304,13 +328,19 @@ def chat_query(
         )
         db.commit()
 
-        # Store in vector memory for future RAG
+        # Store in vector memory for future RAG (tenant-scoped)
         try:
             memory = get_vector_memory()
             if memory.is_available:
                 now = datetime.now()
-                memory.add_message(conv_id, "user", chat_request.question, now)
-                memory.add_message(conv_id, "assistant", result["response"], now)
+                memory.add_message(
+                    conv_id, "user", chat_request.question, now,
+                    org_id=current_user.org_id, user_id=current_user.id,
+                )
+                memory.add_message(
+                    conv_id, "assistant", result["response"], now,
+                    org_id=current_user.org_id, user_id=current_user.id,
+                )
         except Exception as e:
             logger.warning("Failed to store in vector memory: %s", e)
 
@@ -463,6 +493,25 @@ def get_chat_sessions(
     return {"success": True, "sessions": sessions}
 
 
+# ── Audio Upload Security Policy ──────────────────────────────────────────
+MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB strict limit for speech audio
+ALLOWED_AUDIO_MIME_TYPES = {
+    "audio/webm",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mp3",
+    "audio/mpeg",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/ogg",
+    "audio/flac",
+    "audio/aac",
+    "audio/x-m4a",
+    "application/octet-stream",
+}
+
+
 @router.post("/transcribe")
 @limiter.limit("20/minute")
 async def transcribe_audio(
@@ -473,32 +522,78 @@ async def transcribe_audio(
     """
     Transcribe spoken English audio to text using Sarvam AI Saaras v3 STT.
 
-    Flow: Spoken audio → Sarvam STT (language_code="en-IN", mode="transcribe") → English text.
-    The resulting English text feeds directly into the existing inventory RAG pipeline.
+    Security & Performance Guarantees:
+    - Strict 10MB file size boundary enforced via streaming chunked read (prevents RAM exhaustion).
+    - MIME type & signature verification.
+    - Spoken audio → Sarvam STT (language_code="en-IN", mode="transcribe") → English text.
     """
     if not settings.SARVAM_API_KEY:
         raise ValidationError("Sarvam AI API key is not configured on the server")
 
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    if content_type and content_type not in ALLOWED_AUDIO_MIME_TYPES:
+        raise ValidationError(f"Unsupported audio format: '{content_type}'. Supported: webm, wav, mp3, m4a, ogg, flac")
+
+    # 1. Stream in chunks with cumulative size guard (prevents unbounded memory consumption)
+    chunk_size = 64 * 1024  # 64 KB
+    chunks = []
+    total_bytes = 0
+
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > MAX_AUDIO_SIZE_BYTES:
+            raise ValidationError(
+                f"Uploaded audio exceeds the maximum size limit of {MAX_AUDIO_SIZE_BYTES // (1024 * 1024)}MB"
+            )
+        chunks.append(chunk)
+
+    if total_bytes < 32:
+        raise ValidationError("Audio file is empty or too short to process")
+
+    content = b"".join(chunks)
+
+    # 2. Audio signature verification (magic header check)
+    is_valid_audio = (
+        content.startswith(b"\x1a\x45\xdf\xa3")  # WebM / Matroska
+        or content.startswith(b"RIFF")          # WAV
+        or content.startswith(b"ID3")           # MP3 ID3v2
+        or content.startswith(b"\xff\xfb")      # MP3 frame
+        or content.startswith(b"\xff\xf3")      # MP3 frame
+        or content.startswith(b"OggS")          # OGG
+        or content.startswith(b"fLaC")          # FLAC
+        or b"ftyp" in content[:32]              # M4A / MP4 audio container
+    )
+    if not is_valid_audio and content_type not in ["audio/webm", "audio/wav"]:
+        raise ValidationError("Invalid audio file signature: file does not contain valid audio data")
+
     try:
         from sarvamai import SarvamAI
 
-        content = await file.read()
-
         client = SarvamAI(api_subscription_key=settings.SARVAM_API_KEY)
 
+        codec = "webm"
+        if content.startswith(b"RIFF") or "wav" in content_type:
+            codec = "wav"
+        elif content.startswith(b"ID3") or "mp3" in content_type or "mpeg" in content_type:
+            codec = "mp3"
+
         response = client.speech_to_text.transcribe(
-            file=(file.filename or "audio.webm", content, file.content_type or "audio/webm"),
+            file=(file.filename or f"audio.{codec}", content, file.content_type or f"audio/{codec}"),
             model="saaras:v3",
             mode="transcribe",
             language_code="en-IN",
-            input_audio_codec="webm",
+            input_audio_codec=codec,
         )
 
         transcribed_text = (response.transcript or "").strip()
 
         logger.info(
-            "Sarvam English STT complete for user=%s length=%d",
+            "Sarvam English STT complete for user=%s size=%d bytes length=%d chars",
             current_user.username,
+            total_bytes,
             len(transcribed_text),
         )
 
@@ -510,5 +605,6 @@ async def transcribe_audio(
     except Exception as e:
         logger.error("Sarvam STT error user=%s: %s", current_user.username, str(e))
         raise ValidationError(f"Transcription failed: {str(e)}")
+
 
 

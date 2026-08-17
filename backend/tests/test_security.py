@@ -244,3 +244,30 @@ class TestEmailMasking:
         assert mask_email("") == ""
         assert mask_email("notanemail") == "notanemail"
 
+
+class TestAudioUploadSecurity:
+    """Test audio upload security boundaries."""
+
+    def test_transcribe_rejects_unsupported_mime(self, client, test_user):
+        import io
+        from tests.conftest import get_auth_header
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+
+        fake_exe = io.BytesIO(b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00" * 10)
+        files = {"file": ("malicious.exe", fake_exe, "application/x-msdownload")}
+
+        res = client.post("/api/chat/transcribe", files=files, headers=headers)
+        assert res.status_code in [400, 422]
+
+    def test_transcribe_rejects_empty_file(self, client, test_user):
+        import io
+        from tests.conftest import get_auth_header
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+
+        empty_file = io.BytesIO(b"")
+        files = {"file": ("empty.webm", empty_file, "audio/webm")}
+
+        res = client.post("/api/chat/transcribe", files=files, headers=headers)
+        assert res.status_code in [400, 422]
+
+

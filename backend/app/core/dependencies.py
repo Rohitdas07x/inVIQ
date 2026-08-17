@@ -70,11 +70,12 @@ _user_auth_cache_lock = threading.Lock()
 
 
 def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     """
-    Decode and validate the Bearer JWT token on every protected request.
+    Decode and validate the Bearer JWT token or HttpOnly cookie on every protected request.
     Uses fast L1 memory cache (30s) to avoid redundant DB and Redis round-trips.
     """
     credentials_exception = HTTPException(
@@ -83,7 +84,14 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    if not token:
+        token = request.cookies.get("access_token")
+
+    if not token:
+        raise credentials_exception
+
     # 1. Fast L1 auth cache check (<0.05ms) — cache validated user_id to skip JWT + Redis decode
+
     now = time.time()
     cached_user_id = None
     with _user_auth_cache_lock:
@@ -96,12 +104,23 @@ def get_current_user(
                 _user_auth_cache.pop(token, None)
 
     if cached_user_id is not None:
+        # ── Check blacklist FIRST — a logged-out token must not ride the L1 cache ──
+        from app.infrastructure.cache.token_blacklist import is_token_blacklisted
+        if is_token_blacklisted(token):
+            with _user_auth_cache_lock:
+                _user_auth_cache.pop(token, None)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         user_repo = UserRepository(db)
         user = user_repo.get_by_id(cached_user_id)
         if user and user.is_active:
             return user
         with _user_auth_cache_lock:
             _user_auth_cache.pop(token, None)
+
 
     try:
         # ── Check token blacklist (invalidated on logout) ──────────────
@@ -131,6 +150,25 @@ def get_current_user(
                 detail="User account is disabled",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        # ── Check if token was issued before a password reset ──────────
+        try:
+            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+            r = get_redis()
+            if r and is_redis_available():
+                pw_changed_ts = r.get(f"user_pw_changed:{user.id}")
+                if pw_changed_ts:
+                    token_iat = payload.get("iat", 0)
+                    if token_iat < int(pw_changed_ts):
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Session invalidated after password reset. Please log in again.",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Redis unavailable — skip check, don't break auth
 
         # Populate L1 cache with validated user_id (30s TTL)
         with _user_auth_cache_lock:
@@ -218,4 +256,18 @@ def require_vendor(
             detail="Vendor access required.",
         )
     return current_user
+
+
+def get_caller_org_id(user: User) -> Optional[int]:
+    """
+    Return org_id for tenant-scoped operations.
+    - super_admin bypasses org scoping (returns None).
+    - All normal users must belong to an organization; if org_id is None, raises AuthorizationError (403).
+    """
+    if user.role == "super_admin":
+        return None
+    if user.org_id is None:
+        raise AuthorizationError("User is not assigned to an organization")
+    return user.org_id
+
 

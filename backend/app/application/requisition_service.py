@@ -77,11 +77,17 @@ class RequisitionService:
         urgency: str,
         items: List[dict],
         notes: Optional[str] = None,
+        org_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        from app.core.exceptions import AuthorizationError
         try:
             location = self.repo.get_location(location_id)
             if not location:
                 raise NotFoundError("Location", location_id)
+
+            # ── Tenant ownership check on location ──────────────────────────
+            if org_id is not None and location.org_id != org_id:
+                raise AuthorizationError("Location does not belong to your organization")
 
             if urgency not in ("LOW", "NORMAL", "HIGH", "EMERGENCY"):
                 raise ValidationError(
@@ -92,6 +98,14 @@ class RequisitionService:
                 item = self.repo.get_item(item_data["item_id"])
                 if not item:
                     raise NotFoundError("Item", item_data["item_id"])
+
+                # ── Tenant ownership check on item ──────────────────────────
+                if org_id is not None and item.org_id != org_id:
+                    raise AuthorizationError(
+                        f"Item '{item.name}' does not belong to your organization"
+                    )
+
+
                 if item_data.get("quantity", 0) <= 0:
                     raise ValidationError(
                         f"Quantity must be positive for item {item.name}"
@@ -126,7 +140,7 @@ class RequisitionService:
                 "data": self._format_requisition(requisition),
             }
 
-        except (NotFoundError, ValidationError, DatabaseError):
+        except (NotFoundError, ValidationError, AuthorizationError, DatabaseError):
             self.repo.rollback()
             raise
         except Exception as e:
@@ -134,17 +148,19 @@ class RequisitionService:
             logger.error("Unexpected error in create_requisition: %s", str(e))
             raise DatabaseError(f"Failed to create requisition: {str(e)}")
 
+
     def list_requisitions(
         self,
         status: Optional[str] = None,
         location_id: Optional[int] = None,
         requested_by: Optional[str] = None,
+        org_id: Optional[int] = None,
     ) -> List[dict]:
-        requisitions = self.repo.list_all(status, location_id, requested_by)
+        requisitions = self.repo.list_all(status, location_id, requested_by, org_id=org_id)
         return [self._format_requisition(r) for r in requisitions]
 
-    def get_requisition(self, requisition_id: int) -> Optional[dict]:
-        requisition = self.repo.get_with_full_details(requisition_id)
+    def get_requisition(self, requisition_id: int, org_id: Optional[int] = None) -> Optional[dict]:
+        requisition = self.repo.get_with_full_details(requisition_id, org_id=org_id)
         if not requisition:
             return None
         return self._format_requisition(requisition)
@@ -154,12 +170,20 @@ class RequisitionService:
         requisition_id: int,
         approved_by: str,
         item_adjustments: Optional[List[dict]] = None,
+        org_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        from app.core.exceptions import AuthorizationError
         try:
             requisition = self.repo.get_by_id(requisition_id, load_items=True)
 
             if not requisition:
                 raise NotFoundError("Requisition", requisition_id)
+
+            # ── Tenant ownership check ──────────────────────────────────────
+            if org_id is not None:
+                location = self.repo.get_location(requisition.location_id)
+                if not location or location.org_id != org_id:
+                    raise AuthorizationError("Requisition does not belong to your organization")
 
             if requisition.status != "PENDING":
                 raise InvalidStateError(
@@ -238,6 +262,7 @@ class RequisitionService:
             NotFoundError,
             InvalidStateError,
             InsufficientStockError,
+            AuthorizationError,
             DatabaseError,
         ):
             self.repo.rollback()
@@ -248,13 +273,20 @@ class RequisitionService:
             raise DatabaseError(f"Failed to approve requisition: {str(e)}")
 
     def reject_requisition(
-        self, requisition_id: int, rejected_by: str, reason: str
+        self, requisition_id: int, rejected_by: str, reason: str, org_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        from app.core.exceptions import AuthorizationError
         try:
             requisition = self.repo.get_by_id(requisition_id)
 
             if not requisition:
                 raise NotFoundError("Requisition", requisition_id)
+
+            # ── Tenant ownership check ──────────────────────────────────────
+            if org_id is not None:
+                location = self.repo.get_location(requisition.location_id)
+                if not location or location.org_id != org_id:
+                    raise AuthorizationError("Requisition does not belong to your organization")
 
             if requisition.status != "PENDING":
                 raise InvalidStateError(
@@ -277,7 +309,7 @@ class RequisitionService:
                 "message": f"Requisition {requisition.requisition_number} rejected.",
             }
 
-        except (NotFoundError, InvalidStateError, DatabaseError):
+        except (NotFoundError, InvalidStateError, AuthorizationError, DatabaseError):
             self.repo.rollback()
             raise
         except Exception as e:
@@ -286,13 +318,21 @@ class RequisitionService:
             raise DatabaseError(f"Failed to reject requisition: {str(e)}")
 
     def cancel_requisition(
-        self, requisition_id: int, cancelled_by: str
+        self, requisition_id: int, cancelled_by: str, org_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        from app.core.exceptions import AuthorizationError
         try:
             requisition = self.repo.get_by_id(requisition_id)
 
             if not requisition:
                 raise NotFoundError("Requisition", requisition_id)
+
+            # ── Tenant ownership check ──────────────────────────────────────
+            if org_id is not None:
+                location = self.repo.get_location(requisition.location_id)
+                if not location or location.org_id != org_id:
+                    raise AuthorizationError("Requisition does not belong to your organization")
+
 
             if requisition.status != "PENDING":
                 raise InvalidStateError("Only PENDING requisitions can be cancelled")
@@ -305,7 +345,7 @@ class RequisitionService:
                 "message": f"Requisition {requisition.requisition_number} cancelled.",
             }
 
-        except (NotFoundError, InvalidStateError, DatabaseError):
+        except (NotFoundError, InvalidStateError, AuthorizationError, DatabaseError):
             self.repo.rollback()
             raise
         except Exception as e:
@@ -313,11 +353,53 @@ class RequisitionService:
             logger.error("Unexpected error in cancel_requisition: %s", str(e))
             raise DatabaseError(f"Failed to cancel requisition: {str(e)}")
 
-    def get_stats(self) -> dict:
+    def fulfill_requisition(
+        self, requisition_id: int, fulfilled_by: str, org_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        from app.core.exceptions import AuthorizationError
+        try:
+            requisition = self.repo.get_by_id(requisition_id, load_items=True)
+
+            if not requisition:
+                raise NotFoundError("Requisition", requisition_id)
+
+            # ── Tenant ownership check ──────────────────────────────────────
+            if org_id is not None:
+                location = self.repo.get_location(requisition.location_id)
+                if not location or location.org_id != org_id:
+                    raise AuthorizationError("Requisition does not belong to your organization")
+
+            if requisition.status not in ("APPROVED", "PENDING"):
+                raise InvalidStateError(f"Cannot fulfill: requisition is already {requisition.status}")
+
+            # If not yet approved, approve and deduct stock first
+            if requisition.status == "PENDING":
+                self.approve_requisition(requisition_id, approved_by=fulfilled_by, org_id=org_id)
+                requisition = self.repo.get_by_id(requisition_id, load_items=True)
+
+            requisition.status = "FULFILLED"
+            self.repo.commit()
+
+            return {
+                "success": True,
+                "message": f"Requisition {requisition.requisition_number} marked as fulfilled.",
+                "data": self._format_requisition(requisition),
+            }
+
+        except (NotFoundError, InvalidStateError, InsufficientStockError, AuthorizationError, DatabaseError):
+            self.repo.rollback()
+            raise
+        except Exception as e:
+            self.repo.rollback()
+            logger.error("Unexpected error in fulfill_requisition: %s", str(e))
+            raise DatabaseError(f"Failed to fulfill requisition: {str(e)}")
+
+    def get_stats(self, org_id: Optional[int] = None) -> dict:
+
         return {
-            "total": self.repo.count_total(),
-            "pending": self.repo.count_by_status("PENDING"),
-            "approved_today": self.repo.count_approved_today(),
-            "rejected": self.repo.count_by_status("REJECTED"),
-            "emergency_pending": self.repo.count_emergency_pending(),
+            "total": self.repo.count_total(org_id=org_id),
+            "pending": self.repo.count_by_status("PENDING", org_id=org_id),
+            "approved_today": self.repo.count_approved_today(org_id=org_id),
+            "rejected": self.repo.count_by_status("REJECTED", org_id=org_id),
+            "emergency_pending": self.repo.count_emergency_pending(org_id=org_id),
         }
