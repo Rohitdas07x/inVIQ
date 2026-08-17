@@ -1,5 +1,6 @@
 import { useEffect, useState, createContext, useContext, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import api from '../services/api';
 
 const WebSocketContext = createContext(null);
 
@@ -29,22 +30,35 @@ export function WebSocketProvider({ children }) {
     useEffect(() => {
         if (!user) return;
 
-        // Guard against calling connect() after the component has unmounted
         let isMounted = true;
         let ws = null;
 
-        const connect = () => {
+        const connect = async () => {
             if (!isMounted) return;
 
-            // Retrieve the token fresh on every (re)connect attempt
-            const token = localStorage.getItem('access_token');
-            if (!token) {
-                console.warn('WebSocket: no access_token found, skipping connect');
-                return;
+            const wsBase = getWsBaseUrl();
+            let wsUrl = '';
+
+            try {
+                // Request a short-lived (30s), single-use ticket to prevent token leakage in query strings/logs
+                const ticketRes = await api.post('/websocket/ticket');
+                const ticket = ticketRes?.data?.ticket;
+                if (ticket) {
+                    wsUrl = `${wsBase}/ws/alerts?ticket=${encodeURIComponent(ticket)}`;
+                }
+            } catch (err) {
+                console.warn('WebSocket: Ticket request failed, trying session token fallback', err);
             }
 
-            const wsBase = getWsBaseUrl();
-            const wsUrl = `${wsBase}/ws/alerts?token=${encodeURIComponent(token)}`;
+            if (!wsUrl) {
+                const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+                if (!token) {
+                    console.warn('WebSocket: no credentials found, skipping connect');
+                    return;
+                }
+                wsUrl = `${wsBase}/ws/alerts?token=${encodeURIComponent(token)}`;
+            }
+
 
             try {
                 ws = new WebSocket(wsUrl);

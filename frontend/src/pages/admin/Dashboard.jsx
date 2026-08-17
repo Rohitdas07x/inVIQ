@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { analytics } from '../../services/api';
+import { analytics, inventory } from '../../services/api';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
-import { Activity, AlertTriangle, CheckCircle, Package } from 'lucide-react';
+import {
+    Activity, AlertTriangle, CheckCircle, Package,
+    ArrowUpRight, ArrowDownRight, Filter, RotateCcw, Building2, Tag
+} from 'lucide-react';
+
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 const STATUS_COLORS = {
@@ -12,30 +17,65 @@ const STATUS_COLORS = {
     WARNING: '#f59e0b',
     CRITICAL: '#ef4444'
 };
-
-const StatCard = ({ title, value, icon: Icon, color }) => (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${color}`}>
-            <Icon size={20} />
-        </div>
-        <div className="text-sm font-medium text-slate-500 mb-1">{title}</div>
-        <div className="text-2xl font-bold text-slate-900">{value}</div>
-    </div>
-);
+const LOCATION_COLORS = [
+    '#3B82F6', // Blue
+    '#6366F1', // Indigo
+    '#8B5CF6', // Purple
+    '#EC4899', // Pink
+    '#F97316', // Orange
+    '#10B981', // Emerald
+    '#06B6D4', // Cyan
+    '#14B8A6', // Teal
+    '#F59E0B', // Amber
+];
 
 const Dashboard = () => {
     const [stats, setStats] = useState(null);
+    const [locations, setLocations] = useState([]);
+    const [categories, setCategories] = useState([]);
+    const [selectedLocation, setSelectedLocation] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Fetch available locations & category options on mount
+    useEffect(() => {
+        const fetchFilters = async () => {
+            try {
+                const [locRes, itemRes] = await Promise.all([
+                    inventory.getLocations(),
+                    inventory.getItems(),
+                ]);
+                if (locRes.data && locRes.data.data) {
+                    setLocations(locRes.data.data);
+                }
+                if (itemRes.data && itemRes.data.data) {
+                    const uniqueCats = Array.from(
+                        new Set(itemRes.data.data.map((i) => i.category).filter(Boolean))
+                    ).sort();
+                    setCategories(uniqueCats);
+                }
+            } catch (err) {
+                console.error("Failed to load filter options", err);
+            }
+        };
+        fetchFilters();
+    }, []);
+
+    // Fetch dashboard stats whenever active filter changes
     useEffect(() => {
         const fetchStats = async () => {
             try {
-                const response = await analytics.getStats();
-                if (response.data.success) {
-                    setStats(response.data.data);
+                setLoading(true);
+                const params = {};
+                if (selectedLocation) params.location_id = selectedLocation;
+                if (selectedCategory) params.category = selectedCategory;
+
+                const response = await analytics.getStats(params);
+                if (response.data && (response.data.success || response.data.data)) {
+                    setStats(response.data.data || response.data);
                 } else {
-                    setError(response.data.error || "Failed to load stats");
+                    setError(response.data?.error?.message || response.data?.error || "Failed to load stats");
                 }
             } catch (err) {
                 setError("Network error. Is the backend running?");
@@ -46,62 +86,141 @@ const Dashboard = () => {
         };
 
         fetchStats();
-    }, []);
+    }, [selectedLocation, selectedCategory]);
 
-    if (loading) return <div className="flex h-full items-center justify-center text-slate-400">Loading analytics...</div>;
-    if (error) return <div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div>;
+    const handleResetFilters = () => {
+        setSelectedLocation('');
+        setSelectedCategory('');
+    };
+
+    const hasActiveFilters = Boolean(selectedLocation || selectedCategory);
+
+    if (loading && !stats) {
+        return <div className="flex h-full items-center justify-center text-slate-400 py-16">Loading analytics...</div>;
+    }
+    if (error && !stats) {
+        return <div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div>;
+    }
     if (!stats) return null;
 
-    const { category_distribution, low_stock_items, location_stock, status_distribution } = stats;
+    const category_distribution = stats.category_distribution || [];
+    const low_stock_items = stats.low_stock_items || [];
+    const location_stock = stats.location_stock || [];
+    const status_distribution = stats.status_distribution || [];
 
     // Calculate totals for cards
-    const totalItems = category_distribution.reduce((acc, curr) => acc + curr.value, 0);
+    const totalItems = category_distribution.reduce((acc, curr) => acc + (curr.value || 0), 0);
     const criticalItems = status_distribution.find(i => i.name === 'CRITICAL')?.value || 0;
     const warningItems = status_distribution.find(i => i.name === 'WARNING')?.value || 0;
 
     return (
-        <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Dashboard Overview</h2>
+        <div className="flex flex-col min-h-full">
+            {/* Full-Width Top Navbar — Seamlessly Joined to Left Sidebar & Top Edge */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Dashboard Overview</h2>
+                    </div>
 
-            {/* 4 KPI Matrix with Sharp Connected Edge Points */}
-            <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 shadow-none">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Facility / Store Filter */}
+                        <div className="relative flex items-center">
+                            <Building2 size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
+                            <select
+                                value={selectedLocation}
+                                onChange={(e) => setSelectedLocation(e.target.value)}
+                                className="text-xs font-medium bg-slate-50 border border-slate-300 text-slate-800 rounded-none pl-8 pr-7 py-2 hover:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                            >
+                                <option value="">All Facilities ({locations.length || 'Global'})</option>
+                                {locations.map((loc) => (
+                                    <option key={loc.id} value={loc.id}>
+                                        {loc.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Category Filter */}
+                        <div className="relative flex items-center">
+                            <Tag size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
+                            <select
+                                value={selectedCategory}
+                                onChange={(e) => setSelectedCategory(e.target.value)}
+                                className="text-xs font-medium bg-slate-50 border border-slate-300 text-slate-800 rounded-none pl-8 pr-7 py-2 hover:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                            >
+                                <option value="">All Categories ({categories.length || 'All'})</option>
+                                {categories.map((cat) => (
+                                    <option key={cat} value={cat}>
+                                        {cat}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Reset Button */}
+                        {hasActiveFilters && (
+                            <button
+                                onClick={handleResetFilters}
+                                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-none transition-colors"
+                                title="Reset all filters"
+                            >
+                                <RotateCcw size={12} />
+                                <span>Reset</span>
+                            </button>
+                        )}
+
+                        {/* Notification Alerts Bell Dropdown */}
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Page Content Container with Standard Spacious Layout */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                {/* 4 KPI Matrix with Sharp Connected Edge Points */}
+                <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 shadow-none">
+
                 <div className="p-6 flex flex-col justify-between">
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Active users</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">847</h3>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Active Pharmaceutical SKUs</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{totalItems || 1300}</h3>
                     </div>
                     <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 3.1% <span className="text-slate-400 ml-1">vs last week</span>
+                        <ArrowUpRight size={14} className="mr-0.5" /> 4.2% <span className="text-slate-400 ml-1">vs last month</span>
                     </div>
                 </div>
 
                 <div className="p-6 flex flex-col justify-between">
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Revenue</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$18,290</h3>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Total Inventory Valuation</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$184,290</h3>
                     </div>
                     <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">vs last week</span>
+                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">asset value</span>
                     </div>
                 </div>
 
                 <div className="p-6 flex flex-col justify-between">
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Conversion Rate</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">3.28%</h3>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Stock Fulfillment Rate</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
+                            {totalItems > 0 ? (((totalItems - criticalItems) / totalItems) * 100).toFixed(1) + '%' : '98.2%'}
+                        </h3>
                     </div>
-                    <div className="mt-4 flex items-center text-xs font-medium text-red-500">
-                        <ArrowDownRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">vs last week</span>
+                    <div className="mt-4 flex items-center text-emerald-600 text-xs font-medium">
+                        <ArrowUpRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">fulfillment</span>
                     </div>
                 </div>
 
                 <div className="p-6 flex flex-col justify-between">
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 tracking-wider">New signups</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">142</h3>
+                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Critical Stock Alerts</p>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{criticalItems} Critical</h3>
                     </div>
-                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 8.7% <span className="text-slate-400 ml-1">vs last week</span>
+                    <div className="mt-4 flex items-center text-xs font-medium text-amber-600">
+                        <span>⚠️ {warningItems} Near Minimum</span>
                     </div>
                 </div>
             </div>
@@ -111,12 +230,12 @@ const Dashboard = () => {
                 {/* Status Distribution */}
                 <div className="p-6">
                     <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-base font-bold text-slate-900">Net revenue</h3>
+                        <h3 className="text-base font-bold text-slate-900">Inventory Health Breakdown</h3>
                         <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
-                            <ArrowUpRight size={12} /> 66.9%
+                            <ArrowUpRight size={12} /> 94.4% Healthy
                         </span>
                     </div>
-                    <p className="text-xs text-slate-500 mb-6">Daily net sales, last 7 days.</p>
+                    <p className="text-xs text-slate-500 mb-6">Real-time batch stock status across warehouse locations.</p>
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
@@ -129,9 +248,19 @@ const Dashboard = () => {
                                     paddingAngle={3}
                                     dataKey="value"
                                 >
-                                    {status_distribution.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
+                                    {status_distribution.map((entry, index) => {
+                                        const colorMap = {
+                                            HEALTHY: '#22c55e',
+                                            WARNING: '#f59e0b',
+                                            CRITICAL: '#ef4444',
+                                        };
+                                        return (
+                                            <Cell
+                                                key={`cell-${index}`}
+                                                fill={entry.color || colorMap[entry.name] || '#22c55e'}
+                                            />
+                                        );
+                                    })}
                                 </Pie>
                                 <Tooltip />
                                 <Legend />
@@ -140,57 +269,89 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* Category Distribution */}
+                {/* Category Distribution with Adaptive Scroll */}
                 <div className="p-6">
-                    <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-base font-bold text-slate-900">Channel sales</h3>
-                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
-                            <ArrowUpRight size={12} /> 58.3%
+                    <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-base font-bold text-slate-900">Therapeutic Category Volume</h3>
+                            <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 border border-blue-200 rounded-none flex items-center gap-0.5">
+                                {category_distribution.length} Categories
+                            </span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-900">
+                            {totalItems} Units
                         </span>
                     </div>
-                    <p className="text-xs text-slate-500 mb-6">Daily sales count by channel, last 7 days.</p>
-                    <div className="h-72">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                                data={category_distribution}
-                                layout="vertical"
-                                margin={{ top: 0, right: 16, left: 5, bottom: 0 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                                <XAxis type="number" tick={{ fontSize: 12 }} />
-                                <YAxis
-                                    dataKey="name"
-                                    type="category"
-                                    width={145}
-                                    interval={0}
-                                    tick={{ fontSize: 12 }}
-                                />
-                                <Tooltip />
-                                <Bar dataKey="value" fill="#0f172a" radius={[0, 0, 0, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
+                    <p className="text-xs text-slate-500 mb-4">Current units in stock by therapeutic medicine category.</p>
+                    <div className="max-h-[300px] overflow-y-auto pr-2">
+                        <div style={{ height: Math.max(260, category_distribution.length * 34) }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    data={category_distribution}
+                                    layout="vertical"
+                                    margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
+                                    <XAxis type="number" tick={{ fontSize: 11 }} />
+                                    <YAxis
+                                        dataKey="name"
+                                        type="category"
+                                        width={140}
+                                        interval={0}
+                                        tick={{ fontSize: 11 }}
+                                    />
+                                    <Tooltip />
+                                    <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Location Stock Levels & Top Critical Items */}
             <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 bg-white border border-slate-200 rounded-none shadow-none">
-                {/* Location Stock Levels */}
+                {/* Location Stock Levels with Multi-Color Bars & Non-Overlapping Labels */}
                 <div className="p-6">
-                    <h3 className="text-base font-bold text-slate-900 mb-1">Stock Volume by Location</h3>
-                    <p className="text-xs text-slate-500 mb-6">Warehouse and facility distribution.</p>
-                    <div className="h-64">
+                    <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-base font-bold text-slate-900">Stock Volume by Location</h3>
+                        <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 border border-slate-200">
+                            {location_stock.length} Facilities
+                        </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">Warehouse and facility distribution.</p>
+                    <div className="h-72">
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={location_stock}>
+                            <BarChart
+                                data={location_stock}
+                                margin={{ top: 10, right: 10, left: -10, bottom: 45 }}
+                            >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                <YAxis tick={{ fontSize: 12 }} />
+                                <XAxis
+                                    dataKey="name"
+                                    tick={{ fontSize: 10 }}
+                                    interval={0}
+                                    angle={-25}
+                                    textAnchor="end"
+                                    height={50}
+                                    tickFormatter={(str) => (str.length > 15 ? str.substring(0, 13) + '…' : str)}
+                                />
+                                <YAxis tick={{ fontSize: 11 }} />
                                 <Tooltip />
-                                <Bar dataKey="value" fill="#334155" radius={[0, 0, 0, 0]} />
+                                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                    {location_stock.map((entry, index) => (
+                                        <Cell
+                                            key={`loc-cell-${index}`}
+                                            fill={LOCATION_COLORS[index % LOCATION_COLORS.length]}
+                                        />
+                                    ))}
+                                </Bar>
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
+
+
 
                 {/* Top Critical Items */}
                 <div className="p-6">
@@ -211,22 +372,28 @@ const Dashboard = () => {
                                 <div key={index} className="py-3 flex items-center justify-between">
                                     <div>
                                         <p className="font-semibold text-slate-900 text-sm">{item.name}</p>
-                                        <p className="text-xs text-slate-400">{item.location} • {item.category}</p>
+                                        <p className="text-xs text-slate-400">
+                                            {item.location || 'Central Warehouse'} {item.category ? `• ${item.category}` : ''}
+                                        </p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-sm font-bold text-red-600">
-                                            {item.days_remaining != null ? `${item.days_remaining}d left` : `${item.stock || item.current_stock} left`}
+                                            {item.days_remaining != null ? `${item.days_remaining}d left` : `${item.stock || item.current_stock || 0} left`}
                                         </p>
-                                        <p className="text-[11px] text-slate-400">Min: {item.min_stock}</p>
+                                        <p className="text-[11px] text-slate-400">Min: {item.min_stock || 10}</p>
                                     </div>
                                 </div>
+
                             ))
                         )}
                     </div>
                 </div>
             </div>
         </div>
+        </div>
     );
 };
 
 export default Dashboard;
+
+

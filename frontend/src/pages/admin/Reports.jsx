@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { admin, inventory } from '../../services/api';
 import { Download, FileText, MapPin, Calendar } from 'lucide-react';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 
 const LOCATION_TYPE_LABELS = {
     central_warehouse: '🏭 Warehouse',
@@ -79,14 +80,28 @@ const Reports = () => {
     }, {});
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h2 className="text-2xl font-bold text-slate-900">Reports</h2>
-                <p className="text-slate-500">Generate and download various inventory reports</p>
+        <div className="flex flex-col min-h-full">
+            {/* Full-Width Top Navbar — Seamlessly Joined to Left Sidebar & Top Edge */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Reports & Analytics</h2>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Notification Alerts Bell Dropdown */}
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                <h3 className="text-lg font-semibold text-slate-800 mb-4">Generate Report</h3>
+            {/* Page Content Container */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                <div className="bg-white border border-slate-200 rounded-none p-6 shadow-none">
+                    <h3 className="text-base font-bold text-slate-900 mb-4">Generate PDF Report</h3>
+
 
                 <div className="space-y-4">
                     {/* Report Type */}
@@ -187,8 +202,10 @@ const Reports = () => {
                 <h3 className="text-lg font-semibold text-slate-800 mb-4">Recent Reports</h3>
                 <p className="text-slate-400 text-sm">No recent reports. Generate your first report above.</p>
             </div>
+            </div>
         </div>
     );
 };
+
 
 export default Reports;

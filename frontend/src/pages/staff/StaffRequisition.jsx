@@ -1,26 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { inventory, requisition } from '../../services/api';
-import { Plus, Trash2, Send, ClipboardList, Clock, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import {
+  Plus, Trash2, Send, ClipboardList, Clock, CheckCircle2, XCircle,
+  Building2, User, LogOut, MessageSquare, AlertTriangle, ShieldCheck
+} from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const URGENCY_OPTIONS = ['LOW', 'NORMAL', 'HIGH', 'EMERGENCY'];
-const DEPARTMENTS = ['Cardiology', 'ICU', 'Emergency', 'Orthopedics', 'Pediatrics', 'Oncology', 'Pharmacy', 'General Ward', 'OT', 'Lab'];
+const DEPARTMENTS = ['Pharmacy Counter', 'Emergency', 'ICU', 'Cardiology', 'General Ward', 'OT', 'Pediatrics', 'Oncology', 'Lab'];
 
 const STATUS_STYLES = {
-    PENDING: 'bg-yellow-100 text-yellow-800',
-    APPROVED: 'bg-green-100 text-green-800',
-    REJECTED: 'bg-red-100 text-red-800',
-    CANCELLED: 'bg-gray-100 text-gray-500',
+    PENDING: 'bg-amber-50 text-amber-700 border border-amber-200',
+    APPROVED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    REJECTED: 'bg-red-50 text-red-700 border border-red-200',
+    CANCELLED: 'bg-slate-50 text-slate-500 border border-slate-200',
 };
 
 const URGENCY_STYLES = {
     LOW: 'bg-slate-100 text-slate-600',
-    NORMAL: 'bg-blue-100 text-blue-700',
-    HIGH: 'bg-orange-100 text-orange-700',
-    EMERGENCY: 'bg-red-100 text-red-700 animate-pulse',
+    NORMAL: 'bg-blue-50 text-blue-700 border border-blue-200',
+    HIGH: 'bg-amber-50 text-amber-700 border border-amber-200',
+    EMERGENCY: 'bg-red-50 text-red-700 border border-red-200 animate-pulse font-bold',
 };
 
 const StaffRequisition = () => {
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
     const [locations, setLocations] = useState([]);
     const [items, setItems] = useState([]);
     const [myRequests, setMyRequests] = useState([]);
@@ -31,12 +37,21 @@ const StaffRequisition = () => {
 
     const [form, setForm] = useState({
         location_id: '',
-        department: '',
+        department: 'Pharmacy Counter',
         urgency: 'NORMAL',
-        requested_by: '',
+        requested_by: user?.full_name || user?.username || 'Staff Pharmacist',
         notes: '',
         items: [{ item_id: '', quantity: 1, notes: '' }],
     });
+
+    useEffect(() => {
+        if (user) {
+            setForm(prev => ({
+                ...prev,
+                requested_by: user.full_name || user.username || 'Staff Pharmacist'
+            }));
+        }
+    }, [user]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -45,7 +60,13 @@ const StaffRequisition = () => {
                     inventory.getLocations(),
                     inventory.getItems(),
                 ]);
-                if (locRes.data.success) setLocations(locRes.data.data);
+                if (locRes.data.success) {
+                    const locs = locRes.data.data;
+                    setLocations(locs);
+                    if (locs.length > 0 && !form.location_id) {
+                        setForm(prev => ({ ...prev, location_id: locs[0].id }));
+                    }
+                }
                 if (itemRes.data.success) setItems(itemRes.data.data);
             } catch (err) {
                 console.error('Failed to fetch data', err);
@@ -99,7 +120,7 @@ const StaffRequisition = () => {
 
         const validItems = form.items.filter(i => i.item_id && i.quantity > 0);
         if (validItems.length === 0) {
-            setError('Please add at least one item with quantity.');
+            setError('Please add at least one item with a valid quantity');
             setLoading(false);
             return;
         }
@@ -107,20 +128,20 @@ const StaffRequisition = () => {
         try {
             const payload = {
                 location_id: parseInt(form.location_id),
-                requested_by: form.requested_by.trim(),
                 department: form.department,
                 urgency: form.urgency,
-                notes: form.notes || null,
+                requested_by: form.requested_by,
+                notes: form.notes,
                 items: validItems.map(i => ({
                     item_id: parseInt(i.item_id),
-                    quantity: parseInt(i.quantity),
-                    notes: i.notes || null,
+                    quantity_requested: parseInt(i.quantity),
+                    notes: i.notes || undefined,
                 })),
             };
 
             const res = await requisition.create(payload);
             if (res.data.success) {
-                setSuccess(res.data.message);
+                setSuccess(res.data.message || 'Requisition submitted to store administrator');
                 setForm(prev => ({
                     ...prev,
                     notes: '',
@@ -144,32 +165,81 @@ const StaffRequisition = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 py-8 px-4">
-            <div className="max-w-4xl mx-auto">
-                {/* Header */}
-                <div className="flex items-center justify-between mb-6">
+        <div className="min-h-screen bg-[#F8FAFC] py-8 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-4xl mx-auto space-y-6">
+
+                {/* ── Top Header / User Context Bar ──────────────────────── */}
+                <div className="bg-white border border-slate-200 p-5 rounded-none shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                        <h1 className="text-3xl font-bold text-slate-900">Stock Requisition</h1>
-                        <p className="text-slate-500 mt-1">Department Staff Portal</p>
+                        <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold uppercase tracking-wider">
+                                Staff Pharmacist Portal
+                            </span>
+                            <span className="text-xs text-slate-400">·</span>
+                            <div className="flex items-center gap-1 text-xs font-semibold text-slate-700">
+                                <Building2 size={13} className="text-blue-600" />
+                                <span>{user?.organization_name || 'Assigned Pharmacy Network'}</span>
+                            </div>
+                        </div>
+                        <h1 className="text-xl font-bold text-slate-900 mt-1">Medicine Requisition &amp; Stock Intake</h1>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Logged in as <strong className="text-slate-800">{user?.full_name || user?.username}</strong>
+                        </p>
                     </div>
-                    <Link to="/admin" className="text-sm text-slate-400 hover:text-blue-600 flex items-center gap-1">
-                        <ArrowLeft size={16} /> Admin Portal
-                    </Link>
+
+                    <div className="flex items-center gap-2.5">
+                        <Link
+                            to="/staff/chat"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-300 rounded-none transition cursor-pointer"
+                        >
+                            <MessageSquare size={13} className="text-blue-600" />
+                            <span>AI Assistant</span>
+                        </Link>
+
+                        <button
+                            onClick={logout}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-600 text-xs font-semibold border border-slate-300 rounded-none transition cursor-pointer"
+                        >
+                            <LogOut size={13} />
+                            <span>Sign Out</span>
+                        </button>
+                    </div>
                 </div>
 
+                {/* ── Unassigned Warning (If no org) ────────────────────── */}
+                {!user?.org_id && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-none flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="text-xs font-bold text-amber-900">Unallocated Staff Account</h4>
+                            <p className="text-[11px] text-amber-700 mt-0.5">
+                                Your account is not yet allocated to an active Chemist Store Admin. Please ask your Pharmacy Store Owner / Admin to allocate your username (<strong>{user?.username}</strong>) in their User Management panel.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Tabs */}
-                <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-slate-100 mb-6">
+                <div className="flex bg-white border border-slate-200 rounded-none p-1 shadow-2xs">
                     <button
                         onClick={() => setActiveTab('form')}
-                        className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${activeTab === 'form' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                            activeTab === 'form'
+                                ? 'bg-blue-600 text-white shadow-2xs'
+                                : 'text-slate-600 hover:bg-slate-50'
+                        }`}
                     >
-                        <Send size={16} className="inline mr-2" />New Request
+                        <Send size={13} className="inline mr-1.5" /> New Requisition
                     </button>
                     <button
                         onClick={() => setActiveTab('history')}
-                        className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                            activeTab === 'history'
+                                ? 'bg-blue-600 text-white shadow-2xs'
+                                : 'text-slate-600 hover:bg-slate-50'
+                        }`}
                     >
-                        <Clock size={16} className="inline mr-2" />My Requests
+                        <Clock size={13} className="inline mr-1.5" /> My Request History
                     </button>
                 </div>
 

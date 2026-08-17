@@ -10,15 +10,34 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+let inMemoryAccessToken = null;
+
+export const setAuthToken = (token) => {
+    inMemoryAccessToken = token;
+    if (token) {
+        sessionStorage.setItem('access_token', token);
+    } else {
+        sessionStorage.removeItem('access_token');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+    }
+};
+
+export const getAuthToken = () => {
+    return inMemoryAccessToken || sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+};
+
 const api = axios.create({
     baseURL: API_URL,
-    timeout: 3000,
+    timeout: 30000,
+    withCredentials: true, // Send HttpOnly SameSite cookies automatically
 });
 
-// ── Request Interceptor: attach JWT to every request ─────────────────────
+
+// ── Request Interceptor: attach JWT if present ────────────────────────────
 api.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('access_token');
+        const token = getAuthToken();
         if (token) {
             config.headers['Authorization'] = `Bearer ${token}`;
         }
@@ -27,21 +46,7 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// ── Response Interceptor: handle expired / invalid tokens ─────────────────
-api.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        if (error?.response?.status === 401) {
-            const hadToken = !!localStorage.getItem('access_token');
-            if (hadToken && window.location.pathname !== '/signin') {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                window.location.href = '/signin';
-            }
-        }
-        return Promise.reject(error);
-    }
-);
+
 
 /**
  * Helper to gracefully fall back to mock data when an API call fails
@@ -63,7 +68,8 @@ async function withMockFallback(apiCallPromise, fallbackData) {
 export const auth = {
     login: (data) => api.post('/auth/login', data),
     logout: () => api.post('/auth/logout'),
-    register: (data) => api.post('/auth/register', data),
+    register: (data) => api.post('/auth/signup', data),
+    adminCreateUser: (data) => api.post('/auth/register', data),
     me: () => api.get('/auth/me'),
     list: (params) => api.get('/auth/users', { params }),
     get: (id) => api.get(`/auth/users/${id}`),
@@ -79,25 +85,33 @@ export const auth = {
     resetPassword: (data) => api.post('/auth/reset-password', data),
     verifyEmail: (data) => api.post('/auth/verify-email', data),
     googleAuth: (idToken) => api.post('/auth/google-auth', { id_token: idToken }),
-    githubAuth: (code) => api.post('/auth/github-auth', { code }),
 };
+
 
 // ── Analytics ─────────────────────────────────────────────────────────────
 export const analytics = {
-    getStats: () => withMockFallback(api.get('/analytics/dashboard/stats'), MOCK_STATS),
+    getStats: (params) => withMockFallback(api.get('/analytics/dashboard/stats', { params }), MOCK_STATS),
     getHeatmap: () => withMockFallback(api.get('/analytics/heatmap'), MOCK_STATS.location_stock),
     getAlerts: (params) => withMockFallback(api.get('/analytics/alerts', { params }), MOCK_STATS.low_stock_items),
     getSummary: () => withMockFallback(api.get('/analytics/summary'), MOCK_STATS),
 };
 
+
 // ── Inventory ─────────────────────────────────────────────────────────────
 export const inventory = {
     getLocations: () => withMockFallback(api.get('/inventory/locations'), MOCK_LOCATIONS),
-    getItems: () => withMockFallback(api.get('/inventory/items'), MOCK_ITEMS),
+    getItems: (params) => withMockFallback(api.get('/inventory/items', { params }), MOCK_ITEMS),
+    getItem: (id) => api.get(`/inventory/items/${id}`),
+    getItemByBarcode: (barcode) => api.get(`/inventory/items/barcode/${barcode}`),
+    createItem: (data) => api.post('/inventory/items', data),
+    updateItem: (id, data) => api.put(`/inventory/items/${id}`, data),
+    deleteItem: (id) => api.delete(`/inventory/items/${id}`),
     getLocationItems: (locationId) => withMockFallback(api.get(`/inventory/location/${locationId}/items`), MOCK_ITEMS),
     addTransaction: (data) => api.post('/inventory/transaction', data).catch(() => ({ data: { success: true, message: "Transaction recorded (Demo)" } })),
     addBulkTransaction: (data) => api.post('/inventory/bulk-transaction', data).catch(() => ({ data: { success: true, message: "Bulk transaction recorded (Demo)" } })),
+    scanDispense: (data) => api.post('/inventory/scan-dispense', data),
 };
+
 
 // ── Chat ──────────────────────────────────────────────────────────────────
 export const chat = {
@@ -143,6 +157,7 @@ export const requisition = {
     approve: (id, data) => api.put(`/requisition/${id}/approve`, data).catch(() => ({ data: { success: true, message: "Approved (Demo)" } })),
     reject: (id, data) => api.put(`/requisition/${id}/reject`, data).catch(() => ({ data: { success: true, message: "Rejected (Demo)" } })),
     cancel: (id, data) => api.put(`/requisition/${id}/cancel`, data).catch(() => ({ data: { success: true, message: "Cancelled (Demo)" } })),
+    fulfill: (id) => api.put(`/requisition/${id}/fulfill`),
 };
 
 // ── Admin ─────────────────────────────────────────────────────────────────
@@ -151,6 +166,11 @@ export const admin = {
     auditLogs: (params) => withMockFallback(api.get('/admin/audit-logs', { params }), MOCK_AUDIT_LOGS),
     usersSummary: () => withMockFallback(api.get('/admin/users/summary'), { total_users: 12, active: 11, roles: { admin: 2, manager: 3, staff: 6, vendor: 1 } }),
     generateReport: (reportType, params) => api.get(`/admin/reports/generate?report_type=${reportType}&${params}`, { responseType: 'blob' }),
+    getSuppliers: () => api.get('/admin/suppliers'),
+    createSupplier: (data) => api.post('/admin/suppliers', data),
+    updateSupplier: (id, data) => api.put(`/admin/suppliers/${id}`, data),
+    deleteSupplier: (id) => api.delete(`/admin/suppliers/${id}`),
 };
+
 
 export default api;

@@ -5,7 +5,6 @@ import { GuestProvider } from './context/GuestContext';
 import { WebSocketProvider } from './context/WebSocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminLayout from './components/layout/AdminLayout';
-import ManagerLayout from './components/layout/ManagerLayout';
 import PreviewBanner from './components/ui/PreviewBanner';
 
 import Dashboard from './pages/admin/Dashboard';
@@ -13,13 +12,10 @@ import Inventory from './pages/admin/Inventory';
 import Chatbot from './pages/admin/Chatbot';
 import Requisitions from './pages/admin/Requisitions';
 import UserManagement from './pages/admin/UserManagement';
+import SupplierManagement from './pages/admin/SupplierManagement';
 import AuditLogs from './pages/admin/AuditLogs';
 import Reports from './pages/admin/Reports';
-
-import ManagerDashboard from './pages/manager/ManagerDashboard';
-import ManagerInventory from './pages/manager/ManagerInventory';
-import ManagerChatbot from './pages/manager/ManagerChatbot';
-import ManagerRequisitions from './pages/manager/ManagerRequisitions';
+import OrganizationSettings from './pages/admin/OrganizationSettings';
 
 import StaffRequisition from './pages/staff/StaffRequisition';
 import DataEntry from './pages/vendor/DataEntry';
@@ -30,6 +26,7 @@ import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
 import VerifyEmail from './pages/auth/VerifyEmail';
 import PreviewDashboard from './pages/preview/PreviewDashboard';
+import OnboardingWizard from './components/ui/OnboardingWizard';
 
 /**
  * Role → home-page map.
@@ -37,7 +34,7 @@ import PreviewDashboard from './pages/preview/PreviewDashboard';
 const ROLE_HOME = {
   super_admin: '/superadmin/dashboard',
   admin:       '/admin/dashboard',
-  manager:     '/manager/dashboard',
+  manager:     '/admin/dashboard',
   staff:       '/staff',
   vendor:      '/vendor',
 };
@@ -59,6 +56,9 @@ function AppContent() {
       <WebSocketProvider>
         {/* PreviewBanner sits outside layouts — always visible to guests */}
         <PreviewBanner />
+        {/* Step-by-step onboarding wizard for newly registered users */}
+        <OnboardingWizard />
+
 
         <Routes>
           {/* ── Public pages ──────────────────────────────────────── */}
@@ -74,24 +74,15 @@ function AppContent() {
 
           {/* ── Vendor (auth required) ────────────────────────────── */}
           <Route element={<ProtectedRoute requiredRole="vendor" />}>
-            <Route path="/vendor" element={<DataEntry />} />
+            <Route element={<AdminLayout />}>
+              <Route path="/vendor" element={<DataEntry />} />
+            </Route>
           </Route>
 
           {/* ── Staff (auth required) ─────────────────────────────── */}
           <Route element={<ProtectedRoute requiredRole="staff" />}>
             <Route path="/staff"      element={<StaffRequisition />} />
             <Route path="/staff/chat" element={<Chatbot />} />
-          </Route>
-
-          {/* ── Manager (auth required) ───────────────────────────── */}
-          <Route element={<ProtectedRoute requiredRole="manager" />}>
-            <Route path="/manager" element={<ManagerLayout />}>
-              <Route index element={<Navigate to="/manager/dashboard" replace />} />
-              <Route path="dashboard"    element={<ManagerDashboard />} />
-              <Route path="inventory"    element={<ManagerInventory />} />
-              <Route path="requisitions" element={<ManagerRequisitions />} />
-              <Route path="chat"         element={<ManagerChatbot />} />
-            </Route>
           </Route>
 
           {/*
@@ -101,23 +92,29 @@ function AppContent() {
             Any interactive action (approve, submit, chat) calls
             showAuthModal() in useGuest() which navigates to /signin.
 
-            Management pages (users, audit-logs, reports) remain
+            Management pages (suppliers, users, audit-logs, reports) remain
             behind a nested ProtectedRoute — guests can't reach them.
           */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             {/* Guest-accessible read-only pages */}
-            <Route path="dashboard"    element={<Dashboard />} />
-            <Route path="inventory"    element={<Inventory />} />
-            <Route path="chat"         element={<Chatbot />} />
-            <Route path="requisitions" element={<Requisitions />} />
+            <Route path="dashboard"         element={<Dashboard />} />
+            <Route path="inventory"         element={<Inventory />} />
+            <Route path="stock-acquisition" element={<DataEntry />} />
+            <Route path="chat"              element={<Chatbot />} />
+            <Route path="requisitions"      element={<Requisitions />} />
+            <Route path="organization"      element={<OrganizationSettings />} />
             {/* Auth-required management pages */}
             <Route element={<ProtectedRoute requiredRole="admin" />}>
-              <Route path="users"      element={<UserManagement />} />
-              <Route path="audit-logs" element={<AuditLogs />} />
-              <Route path="reports"    element={<Reports />} />
+              <Route path="suppliers"       element={<SupplierManagement />} />
+              <Route path="users"           element={<UserManagement />} />
+              <Route path="audit-logs"      element={<AuditLogs />} />
+              <Route path="reports"         element={<Reports />} />
             </Route>
           </Route>
+
+
+
 
           {/* ── Super Admin (auth required) ───────────────────────── */}
           <Route element={<ProtectedRoute requiredRole="super_admin" />}>

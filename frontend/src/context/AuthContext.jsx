@@ -10,7 +10,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import api, { auth } from '../services/api';
+import api, { auth, setAuthToken, getAuthToken } from '../services/api';
 
 const AuthContext = createContext(null);
 export const AuthContextConsumer = AuthContext;
@@ -35,18 +35,6 @@ function decodeJwt(token) {
     }
 }
 
-/** Check if token is expired or will expire within buffer (seconds) */
-function isTokenExpired(token, bufferSeconds = 60) {
-    if (!token || typeof token !== 'string') return true;
-    try {
-        const payload = decodeJwt(token);
-        if (!payload || !payload.exp) return true;
-        return payload.exp * 1000 < Date.now() + bufferSeconds * 1000;
-    } catch {
-        return true;
-    }
-}
-
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -55,66 +43,77 @@ export function AuthProvider({ children }) {
 
     // ── Restore session on first load ──────────────────────────────────────
     useEffect(() => {
-        const token = localStorage.getItem('access_token');
-        if (token) {
-            const payload = decodeJwt(token);
-            if (payload && payload.exp * 1000 > Date.now()) {
-                setUser({
-                    id: payload.sub,
-                    username: payload.username,
-                    role: payload.role,
-                });
-            } else {
-                // Token expired — try to refresh
-                refreshAccessToken().then((newToken) => {
-                    if (!newToken) {
-                        localStorage.removeItem('access_token');
-                        localStorage.removeItem('refresh_token');
-                    }
-                });
+        const initAuth = async () => {
+            const token = getAuthToken();
+            if (token) {
+                const payload = decodeJwt(token);
+                if (payload && payload.exp * 1000 > Date.now()) {
+                    setUser({
+                        id: payload.sub,
+                        username: payload.username,
+                        role: payload.role,
+                        org_id: payload.org_id,
+                    });
+                    setLoading(false);
+                    return;
+                }
             }
-        }
-        setLoading(false);
+
+            // Fallback: verify via HttpOnly cookie by checking /auth/me
+            try {
+                const meRes = await auth.me();
+                if (meRes?.data?.data) {
+                    const u = meRes.data.data;
+                    setUser({
+                        id: u.id,
+                        username: u.username,
+                        role: u.role,
+                        org_id: u.org_id,
+                        email: u.email,
+                        full_name: u.full_name,
+                        location_ids: u.location_ids || [],
+                    });
+                }
+            } catch {
+                setAuthToken(null);
+                setUser(null);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        initAuth();
     }, []);
 
     // ── Token Refresh Logic ────────────────────────────────────────────────
     const refreshAccessToken = useCallback(async () => {
         if (isRefreshing.current) {
-            // Wait for ongoing refresh
             return new Promise((resolve) => {
                 refreshSubscribers.current.push(resolve);
             });
         }
 
         isRefreshing.current = true;
-        const refreshToken = localStorage.getItem('refresh_token');
-
-        if (!refreshToken) {
-            isRefreshing.current = false;
-            notifySubscribers(null);
-            return null;
-        }
 
         try {
-            const response = await auth.refresh({ refresh_token: refreshToken });
-            const { access_token, refresh_token: newRefreshToken } = response.data.data;
+            const response = await auth.refresh({});
+            const { access_token } = response.data.data;
 
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', newRefreshToken);
+            setAuthToken(access_token);
 
             const payload = decodeJwt(access_token);
-            setUser({
+            setUser((prev) => ({
+                ...prev,
                 id: payload.sub,
                 username: payload.username,
                 role: payload.role,
-            });
+                org_id: payload.org_id,
+            }));
 
             notifySubscribers(access_token);
             return access_token;
-        } catch (error) {
-            // Refresh failed — clear everything
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
+        } catch {
+            setAuthToken(null);
             setUser(null);
             notifySubscribers(null);
             return null;
@@ -136,7 +135,7 @@ export function AuthProvider({ children }) {
                 const originalRequest = error.config;
 
                 // If 401 and not already retrying
-                if (error?.response?.status === 401 && !originalRequest._retry) {
+                if (error?.response?.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/login')) {
                     originalRequest._retry = true;
 
                     const newToken = await refreshAccessToken();
@@ -155,57 +154,42 @@ export function AuthProvider({ children }) {
         };
     }, [refreshAccessToken]);
 
-    // ── Login (username + password) ────────────────────────────────────────
-    const login = useCallback(async (username, password) => {
-        const response = await api.post('/auth/login', { username, password });
-        const { access_token, refresh_token } = response.data.data;
+    // ── Login (email + password) ──────────────────────────────────────────
+    const login = useCallback(async (email, password) => {
+        const cleanEmail = email?.trim()?.toLowerCase();
+        const response = await api.post('/auth/login', { email: cleanEmail, password });
+        const { access_token, user: apiUser } = response.data.data;
 
-        localStorage.setItem('access_token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
+        setAuthToken(access_token);
 
         const payload = decodeJwt(access_token);
         const userData = {
             id: payload.sub,
             username: payload.username,
             role: payload.role,
+            org_id: payload.org_id,
+            organization_name: apiUser?.organization_name,
+            email: apiUser?.email || cleanEmail,
+            full_name: apiUser?.full_name,
+            location_ids: apiUser?.location_ids || [],
         };
         setUser(userData);
         return userData;
     }, []);
 
     // ── Login (Google OAuth) ───────────────────────────────────────────────
-    // Receives the credential (ID token) from Google's OAuth popup,
-    // exchanges it for InvIQ JWT tokens via POST /auth/google-auth.
     const loginWithGoogle = useCallback(async (idToken) => {
         const response = await api.post('/auth/google-auth', { id_token: idToken });
-        const { access_token, refresh_token } = response.data.data;
+        const { access_token } = response.data.data;
 
-        localStorage.setItem('access_token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
-
-        const payload = decodeJwt(access_token);
-        const userData = {
-            id: payload.sub,
-            username: payload.username,
-            role: payload.role,
-        };
-        setUser(userData);
-        return userData;
-    }, []);
-
-    // ── Login (GitHub OAuth) ───────────────────────────────────────────────
-    const loginWithGithub = useCallback(async (code) => {
-        const response = await api.post('/auth/github-auth', { code });
-        const { access_token, refresh_token } = response.data.data;
-
-        localStorage.setItem('access_token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
+        setAuthToken(access_token);
 
         const payload = decodeJwt(access_token);
         const userData = {
             id: payload.sub,
             username: payload.username,
             role: payload.role,
+            org_id: payload.org_id,
         };
         setUser(userData);
         return userData;
@@ -218,11 +202,11 @@ export function AuthProvider({ children }) {
         } catch {
             // Ignore errors — still clear local state
         } finally {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
+            setAuthToken(null);
             setUser(null);
         }
     }, []);
+
 
     // ── Role helpers ───────────────────────────────────────────────────────
     const isAdmin = user?.role === 'admin';
@@ -234,7 +218,6 @@ export function AuthProvider({ children }) {
         loading,
         login,
         loginWithGoogle,
-        loginWithGithub,
         logout,
         isAdmin,
         isManager,
@@ -243,6 +226,7 @@ export function AuthProvider({ children }) {
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+
 }
 
 /** Hook to consume auth context anywhere in the app. */

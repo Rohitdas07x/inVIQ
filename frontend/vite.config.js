@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5173,
+    strictPort: true,   // fail loudly instead of silently picking 5174+
     proxy: {
       // Proxy REST API calls → FastAPI backend
       '/api': {

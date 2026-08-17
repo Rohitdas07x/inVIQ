@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { admin } from '../../services/api';
-import { Search, Clock, User, Shield, AlertTriangle, CheckCircle, XCircle, LogIn, LogOut, Trash2, Edit, RefreshCw } from 'lucide-react';
+import { Search, Clock, User, Shield, AlertTriangle, CheckCircle, XCircle, LogIn, LogOut, Trash2, Edit, RefreshCw, Filter } from 'lucide-react';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 
 // Maps the backend action strings to badge colours and icons
 const ACTION_CONFIG = {
@@ -103,23 +104,35 @@ const AuditLogs = () => {
     };
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-900">Audit Logs</h2>
-                    <p className="text-slate-500 text-sm mt-1">Track all system activities and user actions</p>
+        <div className="flex flex-col min-h-full">
+            {/* Full-Width Top Navbar — Seamlessly Joined to Left Sidebar & Top Edge */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Audit Trail & Activity</h2>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <button
+                            onClick={loadLogs}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-none text-xs font-semibold transition"
+                        >
+                            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+                            <span>Refresh</span>
+                        </button>
+
+                        {/* Notification Alerts Bell Dropdown */}
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
+                    </div>
                 </div>
-                <button
-                    onClick={loadLogs}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition text-sm font-medium shadow-sm"
-                >
-                    <RefreshCw size={15} />
-                    Refresh
-                </button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Page Content Container */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                <div className="bg-white border border-slate-200 rounded-none overflow-hidden shadow-none">
+
                 {/* Filters */}
                 <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-3">
                     <div className="relative flex-1 max-w-md">
@@ -232,9 +245,11 @@ const AuditLogs = () => {
                     </div>
                 )}
             </div>
+            </div>
         </div>
     );
 };
+
 
 // Fallback icon used if ACTION_CONFIG has no entry
 function Activity({ size = 16 }) {

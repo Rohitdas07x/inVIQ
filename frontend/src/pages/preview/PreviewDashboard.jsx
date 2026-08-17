@@ -5,7 +5,8 @@ import {
     LayoutDashboard, Package, ClipboardList, MessageSquare,
     PanelLeftClose, PanelLeft, Bell, Search, LogIn, UserPlus,
     Activity, AlertTriangle, CheckCircle, ArrowUpRight, ArrowDownRight,
-    MapPin, Calendar, Check, X, Bot, Send, Mic, Sparkles, Filter, RefreshCw, HelpCircle
+    MapPin, Calendar, Check, X, Bot, Send, Mic, Sparkles, Filter, RefreshCw, HelpCircle,
+    Menu
 } from 'lucide-react';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -31,10 +32,12 @@ export default function PreviewDashboard() {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('dashboard');
     const [collapsed, setCollapsed] = useState(false);
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [selectedLocation, setSelectedLocation] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
     const [requisitions, setRequisitions] = useState(MOCK_REQUISITIONS);
     const [showHelp, setShowHelp] = useState(false);
+
 
     // Chatbot Demo State
     const [chatMessages, setChatMessages] = useState([
@@ -78,28 +81,67 @@ export default function PreviewDashboard() {
 
     return (
         <div className="flex h-screen w-screen bg-[#F8FAFC] font-sans text-slate-900 overflow-hidden">
-            {/* ── 1. Left Collapsible Sidebar ─────────────────────────────── */}
-            <aside className={`h-screen bg-white border-r border-slate-200/80 flex flex-col transition-all duration-300 ease-in-out shrink-0 z-30 ${
-                collapsed ? 'w-20' : 'w-64'
-            }`}>
+            {/* Mobile Backdrop */}
+            {mobileSidebarOpen && (
+                <div
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-40 md:hidden transition-opacity"
+                />
+            )}
+
+            {/* ── 1. Left Collapsible / Mobile Responsive Sidebar ─────────── */}
+            <aside className={`fixed inset-y-0 left-0 md:static h-screen bg-white border-r border-slate-200/80 flex flex-col transition-all duration-300 ease-in-out shrink-0 z-50 md:z-30 ${
+                mobileSidebarOpen ? 'translate-x-0 w-64 shadow-2xl' : '-translate-x-full md:translate-x-0'
+            } ${collapsed ? 'md:w-20' : 'md:w-64'}`}>
                 {/* Brand Header */}
-                <div className="h-16 px-5 flex items-center border-b border-slate-100">
+                <div className="h-16 px-4 flex items-center justify-between border-b border-slate-100">
                     {!collapsed ? (
-                        <div className="flex items-center gap-3">
-                            <img src="/logo.png" alt="InvIQ Logo" className="w-8 h-8 object-contain shrink-0" />
-                            <div className="flex flex-col justify-center">
-                                <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none">InvIQ</h1>
-                                <span className="inline-block mt-1 text-[10px] uppercase font-bold tracking-wider text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded-none border border-slate-200 w-fit">
-                                    Demo Preview
-                                </span>
+                        <>
+                            <div className="flex items-center gap-3">
+                                <img src="/logo.png" alt="InvIQ Logo" className="w-8 h-8 object-contain shrink-0" />
+                                <div className="flex flex-col justify-center">
+                                    <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none">InvIQ</h1>
+                                    <span className="inline-block mt-1 text-[10px] uppercase font-bold tracking-wider text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded-none border border-slate-200 w-fit">
+                                        Demo Preview
+                                    </span>
+                                </div>
                             </div>
-                        </div>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setCollapsed(true)}
+                                    className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                    title="Collapse Sidebar"
+                                >
+                                    <PanelLeftClose size={18} />
+                                </button>
+                                <button
+                                    onClick={() => setMobileSidebarOpen(false)}
+                                    className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                                    title="Close Sidebar"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                        </>
                     ) : (
                         <div className="w-full flex justify-center items-center">
-                            <img src="/logo.png" alt="InvIQ Logo" className="w-8 h-8 object-contain" />
+                            <button
+                                onClick={() => setCollapsed(false)}
+                                className="group p-2 rounded-xl hover:bg-slate-100 transition-all cursor-pointer flex items-center justify-center"
+                                title="Click Logo to Expand Sidebar"
+                                aria-label="Expand Sidebar"
+                            >
+                                <img
+                                    src="/logo.png"
+                                    alt="InvIQ Logo"
+                                    className="w-8 h-8 object-contain group-hover:scale-110 transition-transform"
+                                />
+                            </button>
                         </div>
                     )}
                 </div>
+
+
 
                 {/* Navigation Items */}
                 <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
@@ -114,26 +156,26 @@ export default function PreviewDashboard() {
                         return (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => {
+                                    setActiveTab(tab.id);
+                                    setMobileSidebarOpen(false);
+                                }}
                                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                                     isActive
-                                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-                                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                                } ${collapsed ? 'justify-center' : ''}`}
-                                title={collapsed ? tab.label : undefined}
+                                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20'
+                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                } ${collapsed ? 'md:justify-center md:px-2' : ''}`}
                             >
                                 <Icon size={18} className="shrink-0" />
-                                {!collapsed && (
-                                    <>
-                                        <span className="flex-1 text-left">{tab.label}</span>
-                                        {tab.badge && (
-                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                                                isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600'
-                                            }`}>
-                                                {tab.badge}
-                                            </span>
-                                        )}
-                                    </>
+                                {(!collapsed || mobileSidebarOpen) && (
+                                    <span className="flex-1 text-left truncate">{tab.label}</span>
+                                )}
+                                {tab.badge && (!collapsed || mobileSidebarOpen) && (
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                        isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600'
+                                    }`}>
+                                        {tab.badge}
+                                    </span>
                                 )}
                             </button>
                         );
@@ -231,26 +273,28 @@ export default function PreviewDashboard() {
             {/* ── 2. Main Viewport & Fixed Top Bar ──────────────────────────── */}
             <div className="flex-1 flex flex-col h-screen overflow-hidden min-w-0">
                 {/* Top Header Bar */}
-                <header className="h-16 px-6 bg-white border-b border-slate-200/80 flex items-center justify-between shrink-0 z-20">
-                    {/* Left: Sidebar Toggle + Title */}
+                <header className="h-16 px-4 sm:px-6 bg-white border-b border-slate-200/80 flex items-center justify-between shrink-0 z-20">
+                    {/* Left: Hamburger (mobile) + Title */}
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={() => setCollapsed(!collapsed)}
-                            className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                            title="Toggle Sidebar"
+                            onClick={() => setMobileSidebarOpen(true)}
+                            className="md:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                            aria-label="Open Navigation Menu"
                         >
-                            {collapsed ? <PanelLeft size={20} /> : <PanelLeftClose size={20} />}
+                            <Menu size={20} />
                         </button>
                         <div>
-                            <h2 className="text-lg font-bold text-slate-900 capitalize leading-tight">
+                            <h2 className="text-base sm:text-lg font-bold text-slate-900 capitalize leading-tight truncate max-w-[200px] sm:max-w-none">
                                 {activeTab === 'dashboard' && 'Dashboard Overview'}
                                 {activeTab === 'inventory' && 'Central Inventory & Batch Tracker'}
                                 {activeTab === 'requisitions' && 'Stock Requisitions & Approvals'}
                                 {activeTab === 'chat' && 'AI Inventory Assistant'}
                             </h2>
-                            <span className="text-xs text-slate-400">InvIQ Smart Wholesale & Pharmacy Suite</span>
+                            <span className="hidden sm:block text-xs text-slate-400">InvIQ Smart Wholesale & Pharmacy Suite</span>
                         </div>
                     </div>
+
+
 
                     {/* Right: Prominent Sign In + Sign Up Buttons (Always Visible) */}
                     <div className="flex items-center gap-3">
@@ -288,56 +332,56 @@ export default function PreviewDashboard() {
                             <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 shadow-none">
                                 <div className="p-6 flex flex-col justify-between">
                                     <div>
-                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Active users</p>
-                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">847</h3>
+                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Active Pharmaceutical SKUs</p>
+                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">1,300</h3>
                                     </div>
                                     <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                                        <ArrowUpRight size={14} className="mr-0.5" /> 3.1% <span className="text-slate-400 ml-1">vs last week</span>
+                                        <ArrowUpRight size={14} className="mr-0.5" /> 4.2% <span className="text-slate-400 ml-1">vs last month</span>
                                     </div>
                                 </div>
 
                                 <div className="p-6 flex flex-col justify-between">
                                     <div>
-                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Revenue</p>
-                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$18,290</h3>
+                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Total Inventory Valuation</p>
+                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$184,290</h3>
                                     </div>
                                     <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">vs last week</span>
+                                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">asset value</span>
                                     </div>
                                 </div>
 
                                 <div className="p-6 flex flex-col justify-between">
                                     <div>
-                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Conversion Rate</p>
-                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">3.28%</h3>
+                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Stock Fulfillment Rate</p>
+                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">98.2%</h3>
                                     </div>
-                                    <div className="mt-4 flex items-center text-xs font-medium text-red-500">
-                                        <ArrowDownRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">vs last week</span>
+                                    <div className="mt-4 flex items-center text-emerald-600 text-xs font-medium">
+                                        <ArrowUpRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">fulfillment</span>
                                     </div>
                                 </div>
 
                                 <div className="p-6 flex flex-col justify-between">
                                     <div>
-                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">New signups</p>
-                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">142</h3>
+                                        <p className="text-xs font-semibold text-slate-500 tracking-wider">Critical Stock Alerts</p>
+                                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">4 Critical</h3>
                                     </div>
-                                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                                        <ArrowUpRight size={14} className="mr-0.5" /> 8.7% <span className="text-slate-400 ml-1">vs last week</span>
+                                    <div className="mt-4 flex items-center text-xs font-medium text-amber-600">
+                                        <span>⚠️ 8 Near Minimum</span>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Connected Charts Grid Matrix */}
                             <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 shadow-none">
-                                {/* Net Revenue / Stock Health */}
+                                {/* Stock Health Distribution */}
                                 <div className="p-6">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <h4 className="text-base font-bold text-slate-900">Net revenue</h4>
+                                        <h4 className="text-base font-bold text-slate-900">Inventory Health Breakdown</h4>
                                         <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
-                                            <ArrowUpRight size={12} /> 66.9%
+                                            <ArrowUpRight size={12} /> 94.4% Healthy
                                         </span>
                                     </div>
-                                    <p className="text-xs text-slate-500 mb-6">Daily net sales, last 7 days.</p>
+                                    <p className="text-xs text-slate-500 mb-6">Real-time batch stock status across warehouse locations.</p>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
@@ -351,7 +395,7 @@ export default function PreviewDashboard() {
                                                     dataKey="value"
                                                 >
                                                     {MOCK_STATS.status_distribution.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                        <Cell key={`cell-${index}`} fill={STATUS_COLORS[entry.name] || '#22c55e'} />
                                                     ))}
                                                 </Pie>
                                                 <Tooltip />
@@ -361,15 +405,15 @@ export default function PreviewDashboard() {
                                     </div>
                                 </div>
 
-                                {/* Channel Sales / Category Distribution */}
+                                {/* Therapeutic Category Distribution */}
                                 <div className="p-6">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <h4 className="text-base font-bold text-slate-900">Channel sales</h4>
+                                        <h4 className="text-base font-bold text-slate-900">Therapeutic Category Volume</h4>
                                         <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
-                                            <ArrowUpRight size={12} /> 58.3%
+                                            <ArrowUpRight size={12} /> 1,300 Units
                                         </span>
                                     </div>
-                                    <p className="text-xs text-slate-500 mb-6">Daily sales count by channel, last 7 days.</p>
+                                    <p className="text-xs text-slate-500 mb-6">Current units in stock by therapeutic medicine category.</p>
                                     <div className="h-64">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart
@@ -381,12 +425,13 @@ export default function PreviewDashboard() {
                                                 <XAxis type="number" tick={{ fontSize: 11 }} />
                                                 <YAxis dataKey="name" type="category" width={130} tick={{ fontSize: 11 }} />
                                                 <Tooltip />
-                                                <Bar dataKey="value" fill="#0f172a" radius={[0, 0, 0, 0]} />
+                                                <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </div>
                                 </div>
                             </div>
+
 
                             {/* Critical Shortages Connected Grid */}
                             <div className="bg-white border border-slate-200 rounded-none shadow-none overflow-hidden">

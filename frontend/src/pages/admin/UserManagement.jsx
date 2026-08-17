@@ -1,35 +1,54 @@
 import React, { useState, useEffect } from 'react';
-import { auth as authApi } from '../../services/api';
-import { Users, Search, Plus, Edit2, Trash2, Shield, Building2, ChevronDown, X } from 'lucide-react';
+import { auth as authApi, inventory } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { Users, Search, Plus, Edit2, Trash2, Shield, Building2, ChevronDown, X, RefreshCw, MapPin } from 'lucide-react';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 
 const UserManagement = () => {
+    const { user: currentUser } = useAuth();
     const [users, setUsers] = useState([]);
+    const [locations, setLocations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
-    const [formData, setFormData] = useState({ username: '', email: '', full_name: '', role: 'staff', password: '' });
+    const [formData, setFormData] = useState({
+        username: '',
+        email: '',
+        full_name: '',
+        role: 'staff',
+        password: '',
+        location_ids: []
+    });
     const [saving, setSaving] = useState(false);
 
-    const loadUsers = async () => {
+    const loadData = async () => {
+        setLoading(true);
         try {
-            const res = await authApi.list();
-            if (res.data.success) {
-                setUsers(res.data.data);
+            const [usersRes, locsRes] = await Promise.all([
+                authApi.list(),
+                inventory.getLocations().catch(() => ({ data: { data: [] } })),
+            ]);
+            if (usersRes.data.success) {
+                setUsers(usersRes.data.data);
+            }
+            if (locsRes.data.success) {
+                setLocations(locsRes.data.data);
             }
         } catch (err) {
-            console.error("Failed to load users", err);
+            console.error("Failed to load users or locations", err);
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => { loadUsers(); }, []);
+    useEffect(() => { loadData(); }, []);
 
     const filteredUsers = users.filter(u =>
         u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
         u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+        u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        u.organization_name?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const handleSubmit = async (e) => {
@@ -43,13 +62,12 @@ const UserManagement = () => {
             }
             setShowModal(false);
             setEditingUser(null);
-            setFormData({ username: '', email: '', full_name: '', role: 'staff', password: '' });
-            loadUsers();
+            setFormData({ username: '', email: '', full_name: '', role: 'staff', password: '', location_ids: [] });
+            loadData();
         } catch (err) {
-            // Backend returns { error: { message: "..." } } — not FastAPI's default { detail: "..." }
             const msg =
-                err.response?.data?.error?.message ||   // custom AppException / ValidationError shape
-                err.response?.data?.detail ||           // fallback for any raw FastAPI 422
+                err.response?.data?.error?.message ||
+                err.response?.data?.detail ||
                 'Operation failed. Please check your input and try again.';
             alert(msg);
         } finally {
@@ -59,15 +77,22 @@ const UserManagement = () => {
 
     const handleEdit = (user) => {
         setEditingUser(user);
-        setFormData({ username: user.username, email: user.email || '', full_name: user.full_name || '', role: user.role, password: '' });
+        setFormData({
+            username: user.username,
+            email: user.email || '',
+            full_name: user.full_name || '',
+            role: user.role,
+            password: '',
+            location_ids: user.location_ids || []
+        });
         setShowModal(true);
     };
 
     const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this user?')) return;
+        if (!confirm('Are you sure you want to remove this staff member?')) return;
         try {
             await authApi.delete(id);
-            loadUsers();
+            loadData();
         } catch (err) {
             alert('Delete failed');
         }
@@ -75,149 +100,267 @@ const UserManagement = () => {
 
     const getRoleBadge = (role) => {
         const colors = {
-            super_admin: 'bg-purple-100 text-purple-700',
-            admin:       'bg-red-100 text-red-700',
-            manager:     'bg-yellow-100 text-yellow-700',
-            staff:       'bg-blue-100 text-blue-700',
-            vendor:      'bg-green-100 text-green-700',
+            super_admin: 'bg-purple-50 text-purple-700 border-purple-200',
+            admin:       'bg-red-50 text-red-700 border-red-200',
+            manager:     'bg-amber-50 text-amber-700 border-amber-200',
+            staff:       'bg-blue-50 text-blue-700 border-blue-200',
+            vendor:      'bg-emerald-50 text-emerald-700 border-emerald-200',
         };
-        return <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[role] || 'bg-slate-100 text-slate-700'}`}>{role}</span>;
+        return <span className={`px-2 py-0.5 border rounded-none text-[11px] font-bold uppercase tracking-wider ${colors[role] || 'bg-slate-50 text-slate-700 border-slate-200'}`}>{role}</span>;
+    };
+
+    const getLocationNames = (locIds) => {
+        if (!locIds || locIds.length === 0) return 'All Branches';
+        const matched = locations.filter(l => locIds.includes(l.id));
+        if (matched.length === 0) return `${locIds.length} Branch(es)`;
+        return matched.map(l => l.name).join(', ');
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-900">User Management</h2>
-                    <p className="text-slate-500">Manage system users and their roles</p>
-                </div>
-                <button
-                    onClick={() => { setEditingUser(null); setFormData({ username: '', email: '', full_name: '', role: 'staff', password: '' }); setShowModal(true); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                >
-                    <Plus size={18} /> Add User
-                </button>
-            </div>
+        <div className="flex flex-col min-h-full bg-[#F8FAFC]">
+            {/* ── Sticky Top Navbar ────────────────────────────────────────── */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Staff &amp; User Management</h2>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                            Allocate staff members to your pharmacy organization and assign branch counters
+                        </p>
+                    </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
-                <div className="p-4 border-b border-slate-100">
-                    <div className="relative max-w-md">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Search users..."
-                            className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <button
+                            onClick={loadData}
+                            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-none transition-colors border border-slate-300 cursor-pointer"
+                            title="Refresh Data"
+                        >
+                            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setEditingUser(null);
+                                setFormData({
+                                    username: '',
+                                    email: '',
+                                    full_name: '',
+                                    role: 'staff',
+                                    password: '',
+                                    location_ids: locations.length > 0 ? [locations[0].id] : []
+                                });
+                                setShowModal(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-none transition-colors shadow-2xs cursor-pointer"
+                        >
+                            <Plus size={14} />
+                            <span>Allocate New Staff</span>
+                        </button>
+
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
                     </div>
                 </div>
+            </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-slate-50 text-slate-600 font-medium text-sm">
-                            <tr>
-                                <th className="px-6 py-4">User</th>
-                                <th className="px-6 py-4">Email</th>
-                                <th className="px-6 py-4">Role</th>
-                                <th className="px-6 py-4">Location</th>
-                                <th className="px-6 py-4">Status</th>
-                                <th className="px-6 py-4 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {loading ? (
-                                <tr><td colSpan="6" className="text-center py-8 text-slate-400">Loading...</td></tr>
-                            ) : filteredUsers.length === 0 ? (
-                                <tr><td colSpan="6" className="text-center py-8 text-slate-400">No users found</td></tr>
-                            ) : (
-                                filteredUsers.map(user => (
-                                    <tr key={user.id} className="hover:bg-slate-50 transition">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-medium">
-                                                    {user.username?.[0]?.toUpperCase()}
+            {/* ── Main Content Container ───────────────────────────────────── */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+
+                {/* Info strip */}
+                <div className="bg-blue-50/70 border border-blue-200 p-4 rounded-none flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Building2 className="w-5 h-5 text-blue-600 shrink-0" />
+                        <div>
+                            <p className="text-xs font-bold text-slate-800">
+                                Organization: <span className="text-blue-700">{currentUser?.organization_name || 'Your Pharmacy Network'}</span>
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                                Staff members created here are strictly isolated to your store and cannot access other chemist accounts.
+                            </p>
+                        </div>
+                    </div>
+                    <span className="text-xs font-bold text-blue-800 bg-white border border-blue-200 px-2.5 py-1">
+                        {users.length} User(s)
+                    </span>
+                </div>
+
+                <div className="bg-white rounded-none shadow-2xs border border-slate-200">
+                    <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                        <div className="relative max-w-md w-full">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={14} />
+                            <input
+                                type="text"
+                                placeholder="Search by name, email, or role..."
+                                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600 text-xs"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-50 text-slate-600 font-bold text-[11px] uppercase tracking-wider border-b border-slate-200">
+                                <tr>
+                                    <th className="px-5 py-3">Staff / User</th>
+                                    <th className="px-5 py-3">Email</th>
+                                    <th className="px-5 py-3">Role</th>
+                                    <th className="px-5 py-3">Assigned Branch / Counter</th>
+                                    <th className="px-5 py-3">Status</th>
+                                    <th className="px-5 py-3 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-xs">
+                                {loading ? (
+                                    <tr><td colSpan="6" className="text-center py-12 text-slate-400">Loading user roster...</td></tr>
+                                ) : filteredUsers.length === 0 ? (
+                                    <tr><td colSpan="6" className="text-center py-12 text-slate-400">No staff members found</td></tr>
+                                ) : (
+                                    filteredUsers.map(u => (
+                                        <tr key={u.id} className="hover:bg-slate-50 transition">
+                                            <td className="px-5 py-3.5">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-none bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center text-xs font-bold">
+                                                        {u.username?.[0]?.toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-slate-900">{u.username}</p>
+                                                        <p className="text-[11px] text-slate-500">{u.full_name || 'No full name provided'}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="font-medium text-slate-800">{user.username}</p>
-                                                    <p className="text-xs text-slate-500">{user.full_name || 'No name'}</p>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-slate-600">{u.email || '—'}</td>
+                                            <td className="px-5 py-3.5">{getRoleBadge(u.role)}</td>
+                                            <td className="px-5 py-3.5 text-slate-700">
+                                                <div className="flex items-center gap-1.5">
+                                                    <MapPin size={13} className="text-slate-400 shrink-0" />
+                                                    <span className="truncate max-w-xs">{getLocationNames(u.location_ids)}</span>
                                                 </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-500 text-sm">{user.email || '-'}</td>
-                                        <td className="px-6 py-4">{getRoleBadge(user.role)}</td>
-                                        <td className="px-6 py-4 text-slate-500 text-sm">{user.location_ids?.length || 0} locations</td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {user.is_active ? 'Active' : 'Inactive'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button onClick={() => handleEdit(user)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition">
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button onClick={() => handleDelete(user.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition">
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <span className={`px-2 py-0.5 border rounded-none text-[10px] font-bold uppercase tracking-wider ${u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                                                    {u.is_active ? 'Active' : 'Inactive'}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-right">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button onClick={() => handleEdit(u)} className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-none transition cursor-pointer" title="Edit Staff">
+                                                        <Edit2 size={13} />
+                                                    </button>
+                                                    <button onClick={() => handleDelete(u.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-none transition cursor-pointer" title="Remove Staff">
+                                                        <Trash2 size={13} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             {/* Modal */}
             {showModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold">{editingUser ? 'Edit User' : 'Add New User'}</h3>
-                            <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">
-                                <X size={20} />
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+                    <div className="bg-white border border-slate-200 rounded-none shadow-xl w-full max-w-md p-6 space-y-4">
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900">{editingUser ? 'Edit Staff Allocation' : 'Allocate New Staff Member'}</h3>
+                                <p className="text-[11px] text-slate-500">Assign user credentials and branch location</p>
+                            </div>
+                            <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                                <X size={18} />
                             </button>
                         </div>
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                        <form onSubmit={handleSubmit} className="space-y-3.5">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Username *</label>
-                                <input type="text" required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} />
+                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Username *</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
+                                    value={formData.username}
+                                    onChange={e => setFormData({ ...formData, username: e.target.value })}
+                                />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                                <input type="email" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} />
+                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Email *</label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
+                                    value={formData.email}
+                                    onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-                                <input type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.full_name} onChange={e => setFormData({ ...formData, full_name: e.target.value })} />
+                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Full Name</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
+                                    value={formData.full_name}
+                                    onChange={e => setFormData({ ...formData, full_name: e.target.value })}
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Role *</label>
+                                    <select
+                                        required
+                                        className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
+                                        value={formData.role}
+                                        onChange={e => setFormData({ ...formData, role: e.target.value })}
+                                    >
+                                        <option value="staff">Staff (Pharmacist)</option>
+                                        <option value="vendor">Vendor (Distributor)</option>
+                                        <option value="manager">Branch Manager</option>
+                                        <option value="admin">Store Admin</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Branch Counter</label>
+                                    <select
+                                        className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
+                                        value={formData.location_ids?.[0] || ''}
+                                        onChange={e => setFormData({ ...formData, location_ids: e.target.value ? [parseInt(e.target.value)] : [] })}
+                                    >
+                                        <option value="">All Branches</option>
+                                        {locations.map(loc => (
+                                            <option key={loc.id} value={loc.id}>{loc.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Role *</label>
-                                <select required className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
-                                    <option value="staff">Staff</option>
-                                    <option value="vendor">Vendor</option>
-                                    <option value="manager">Manager</option>
-                                    <option value="admin">Admin</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">{editingUser ? 'New Password (optional)' : 'Password *'}</label>
+                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                    {editingUser ? 'New Password (leave blank to keep)' : 'Initial Password *'}
+                                </label>
                                 <input
                                     type="password"
                                     required={!editingUser}
                                     minLength={8}
-                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-none focus:outline-none focus:ring-1 focus:ring-blue-600"
                                     value={formData.password}
                                     onChange={e => setFormData({ ...formData, password: e.target.value })}
                                 />
-                                <p className="text-xs text-slate-400 mt-1">Minimum 8 characters</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">Minimum 8 characters</p>
                             </div>
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition">Cancel</button>
-                                <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
-                                    {saving ? 'Saving...' : (editingUser ? 'Update' : 'Create')}
+                            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowModal(false)}
+                                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-none transition cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={saving}
+                                    className="px-4 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-none transition disabled:opacity-50 cursor-pointer shadow-2xs"
+                                >
+                                    {saving ? 'Allocating...' : (editingUser ? 'Update Staff' : 'Allocate Staff')}
                                 </button>
                             </div>
                         </form>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { requisition } from '../../services/api';
 import { ClipboardCheck, ClipboardX, ChevronDown, ChevronUp, AlertTriangle, Clock, CheckCircle2, XCircle, Filter, Lock } from 'lucide-react';
 import { useGuest } from '../../context/GuestContext';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 
 const STATUS_STYLES = {
     PENDING: 'bg-yellow-100 text-yellow-800',
@@ -28,34 +29,40 @@ const Requisitions = () => {
     const [actionLoading, setActionLoading] = useState(null);
     const [showRejectModal, setShowRejectModal] = useState(null);
 
-    useEffect(() => {
-        loadData();
-    }, [filter]);
-
     const loadData = async () => {
         try {
-            const params = filter ? { status: filter } : {};
-            const [reqRes, statsRes] = await Promise.all([
-                requisition.list(params),
+            const [reqRes, statRes] = await Promise.all([
+                requisition.list(),
                 requisition.stats(),
             ]);
-            if (reqRes.data.success) setRequests(reqRes.data.data);
-            if (statsRes.data.success) setStats(statsRes.data.data);
+            if (reqRes.data.success) {
+                setRequests(reqRes.data.data);
+            }
+            if (statRes.data.success) {
+                setStats(statRes.data.data);
+            }
         } catch (err) {
-            console.error('Failed to load requisitions', err);
+            console.error('Failed to load requisition data', err);
         }
     };
 
+    useEffect(() => {
+        loadData();
+    }, []);
+
     const handleApprove = async (id) => {
         if (isGuest) {
-            showAuthModal('Approving requisitions requires an account with manager access.');
+            showAuthModal('Sign in to approve stock requisitions.');
             return;
         }
-        if (!approverName.trim()) return alert('Enter your name first.');
         setActionLoading(id);
         try {
-            const res = await requisition.approve(id, { approved_by: approverName.trim() });
-            if (res.data.success) loadData();
+            const res = await requisition.approve(id, {
+                approver_name: approverName || 'Store Admin',
+            });
+            if (res.data.success) {
+                loadData();
+            }
         } catch (err) {
             alert(err.response?.data?.detail || 'Approval failed');
         } finally {
@@ -65,16 +72,14 @@ const Requisitions = () => {
 
     const handleReject = async (id) => {
         if (isGuest) {
-            showAuthModal('Rejecting requisitions requires an account with manager access.');
+            showAuthModal('Sign in to reject stock requisitions.');
             return;
         }
-        if (!approverName.trim()) return alert('Enter your name first.');
-        if (!rejectReason.trim() || rejectReason.trim().length < 5) return alert('Provide a rejection reason (min 5 chars).');
         setActionLoading(id);
         try {
             const res = await requisition.reject(id, {
-                rejected_by: approverName.trim(),
-                reason: rejectReason.trim(),
+                approver_name: approverName || 'Store Admin',
+                reason: rejectReason || 'Stock unavailable',
             });
             if (res.data.success) {
                 setShowRejectModal(null);
@@ -89,42 +94,47 @@ const Requisitions = () => {
     };
 
     return (
-        <div className="space-y-6">
-            {/* Guest preview notice */}
-            {isGuest && (
-                <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
-                    <Lock size={15} className="shrink-0" />
-                    <span>You're in preview mode — browse requisitions freely. Sign in to approve or reject requests.</span>
-                </div>
-            )}
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Requisitions</h1>
-                    <p className="text-sm text-slate-500">Review and approve stock-out requests</p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <label className="text-sm text-slate-500">Your Name:</label>
-                    <input
-                        type="text"
-                        placeholder="Store Manager"
-                        className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-40"
-                        value={approverName}
-                        onChange={(e) => setApproverName(e.target.value)}
-                    />
+        <div className="flex flex-col min-h-full">
+            {/* Full-Width Top Navbar — Seamlessly Joined to Left Sidebar & Top Edge */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Requisitions & Orders</h2>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                            <span className="font-semibold">Approver:</span>
+                            <input
+                                type="text"
+                                placeholder="Store Admin"
+                                className="px-2.5 py-1.5 border border-slate-300 rounded-none text-xs bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-600 w-32"
+                                value={approverName}
+                                onChange={(e) => setApproverName(e.target.value)}
+                            />
+                        </div>
+
+                        {/* Notification Alerts Bell Dropdown */}
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            {stats && (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                    <StatCard label="Total" value={stats.total} color="slate" />
-                    <StatCard label="Pending" value={stats.pending} color="yellow" />
-                    <StatCard label="Approved Today" value={stats.approved_today} color="green" />
-                    <StatCard label="Rejected" value={stats.rejected} color="red" />
-                    <StatCard label="🚨 Emergency" value={stats.emergency_pending} color="red" highlight />
-                </div>
-            )}
+            {/* Page Content Container */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                {/* Stats Cards */}
+                {stats && (
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <StatCard label="Total" value={stats.total} color="slate" />
+                        <StatCard label="Pending" value={stats.pending} color="yellow" />
+                        <StatCard label="Approved Today" value={stats.approved_today} color="green" />
+                        <StatCard label="Rejected" value={stats.rejected} color="red" />
+                        <StatCard label="🚨 Emergency" value={stats.emergency_pending} color="red" highlight />
+                    </div>
+                )}
+
 
             {/* Filter Tabs */}
             <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-slate-100">
@@ -276,9 +286,11 @@ const Requisitions = () => {
                     );
                 })}
             </div>
+            </div>
         </div>
     );
 };
+
 
 // Stat Card Component
 const StatCard = ({ label, value, color, highlight }) => {

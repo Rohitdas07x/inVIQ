@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { inventory } from '../../services/api';
-import { Search, Filter, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Search, Filter, AlertCircle, CheckCircle, AlertTriangle, Building2 } from 'lucide-react';
+import AlertsDropdown from '../../components/layout/AlertsDropdown';
 
 const Inventory = () => {
     const [locations, setLocations] = useState([]);
@@ -55,19 +56,19 @@ const Inventory = () => {
         switch (status) {
             case 'HEALTHY':
                 return (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <CheckCircle size={12} className="mr-1" /> Healthy
                     </span>
                 );
             case 'WARNING':
                 return (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                         <AlertTriangle size={12} className="mr-1" /> Low Stock
                     </span>
                 );
             case 'CRITICAL':
                 return (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-none text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
                         <AlertCircle size={12} className="mr-1" /> Critical
                     </span>
                 );
@@ -77,27 +78,41 @@ const Inventory = () => {
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Inventory Management</h2>
-                    <p className="text-slate-500">View and manage stock levels per location</p>
-                </div>
+        <div className="flex flex-col min-h-full">
+            {/* Full-Width Top Navbar — Seamlessly Joined to Left Sidebar & Top Edge */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Inventory Management</h2>
+                    </div>
 
-                <div className="flex items-center space-x-4 w-full md:w-auto">
-                    <select
-                        className="bg-white border border-slate-200 text-slate-700 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 shadow-sm"
-                        value={selectedLocation}
-                        onChange={(e) => setSelectedLocation(e.target.value)}
-                    >
-                        {locations.map(loc => (
-                            <option key={loc.id} value={loc.id}>{loc.name}</option>
-                        ))}
-                    </select>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        {/* Facility / Location Selector */}
+                        <div className="relative flex items-center">
+                            <Building2 size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
+                            <select
+                                className="text-xs font-medium bg-slate-50 border border-slate-300 text-slate-800 rounded-none pl-8 pr-7 py-2 hover:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                                value={selectedLocation}
+                                onChange={(e) => setSelectedLocation(e.target.value)}
+                            >
+                                {locations.map(loc => (
+                                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Notification Alerts Bell Dropdown */}
+                        <div className="pl-1 border-l border-slate-200">
+                            <AlertsDropdown />
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Page Content Container */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                <div className="bg-white border border-slate-200 rounded-none overflow-hidden shadow-none">
+
                 <div className="p-4 border-b border-slate-100 flex items-center space-x-4">
                     <div className="relative flex-1 max-w-md">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
@@ -147,8 +162,10 @@ const Inventory = () => {
                     </table>
                 </div>
             </div>
+            </div>
         </div>
     );
 };
 
 export default Inventory;
+
