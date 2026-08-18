@@ -190,17 +190,11 @@ class Settings(BaseSettings):
     # ── Derived helpers ────────────────────────────────────────────────
 
     @property
-    def redis_storage_uri(self) -> str:
+    def rate_limit_storage_url(self) -> str:
         """
-        Build the slowapi rate-limiter storage URI.
-        - testing  → always in-memory
-        - REDIS_URL set → use it directly
-        - Upstash REST creds → construct rediss:// URL
-        - fallback → in-memory
+        Connection string for slowapi's Redis backend.
+        Returns REDIS_URL if configured, otherwise Upstash TCP or in-memory fallback.
         """
-        if self.ENVIRONMENT == "testing":
-            return "memory://"
-
         if self.REDIS_URL:
             return self.REDIS_URL
 
@@ -213,7 +207,6 @@ class Settings(BaseSettings):
                     .split("/")[0]
                     .split(":")[0]
                 )
-                # ssl_cert_reqs=none works around macOS system CA store gaps.
                 return (
                     f"rediss://default:{self.UPSTASH_REDIS_REST_TOKEN}"
                     f"@{host}:6379?ssl_cert_reqs=none"
@@ -222,6 +215,11 @@ class Settings(BaseSettings):
                 pass
 
         return "memory://"
+        
+    @property
+    def redis_storage_uri(self) -> str:
+        """Alias for rate_limit_storage_url for slowapi limiter."""
+        return self.rate_limit_storage_url
 
     # ── Production safety validation ───────────────────────────────────
 

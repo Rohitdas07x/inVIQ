@@ -1,38 +1,83 @@
-# ── Docker Compose: InvIQ Multi-Service Production Stack ───────────────────
-# Architecture:
-#   1. app: FastAPI Web API (REST, GraphQL, WebSockets)
-#   2. celery_worker: Asynchronous task processing engine
-#   3. celery_beat: Periodic scheduler for FEFO, stock shortage & cold-chain checks
+# ── Docker Compose: InvIQ Local Development Environment ───────────────────────
+# Stack:
+#   1. db: Local PostgreSQL 15
+#   2. redis: Local Redis 7
+#   3. app: FastAPI Web API (REST, GraphQL, WebSockets)
+#   4. celery_worker: Background task runner
+#   5. celery_beat: Periodic scheduler (FEFO 6h, stock 1h, cold-chain 30m)
 #
-# Redis Architecture:
-#   Upstash Redis (cloud managed) is used as the Redis broker/cache for all services.
-#   All containers connect to Upstash via the REDIS_URL environment variable.
-#   No local Redis container is run.
-#
-# Usage:
-#   docker compose up -d                  → start all services
+# Usage (Development):
+#   docker compose up -d                  → start entire local development stack
 #   docker compose logs -f app            → tail API logs
-#   docker compose logs -f celery_worker  → tail background worker logs
+#   docker compose logs -f celery_worker  → tail worker logs
 #   docker compose logs -f celery_beat    → tail scheduler logs
-#   docker compose down                   → stop all services
+#   docker compose down                   → stop local development stack
+#   docker compose down -v                → stop and remove local database volumes
 
 services:
-  # ── 1. FastAPI Application ────────────────────────────────────────────────
+  # ── 1. Local PostgreSQL Database ──────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: inviq_dev_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-inviq_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inviq_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - inviq_network
+
+  # ── 2. Local Redis Cache & Broker ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: inviq_dev_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - inviq_network
+
+  # ── 3. FastAPI Application ────────────────────────────────────────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: inviq_backend
+    container_name: inviq_dev_backend
     restart: unless-stopped
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       # Application
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       PROJECT_NAME: "Smart Inventory Assistant"
       
-      # Database (PostgreSQL - Neon / Cloud / Local)
-      DATABASE_URL: ${DATABASE_URL}
+      # Database (Local PostgreSQL)
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/inviq_dev}
+      
+      # Redis / Celery Broker (Local Redis)
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
       
       # Frontend & CORS
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
@@ -44,20 +89,14 @@ services:
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
       
-      # LangSmith (Optional)
-      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-InvIQ}
-      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
-      LANGCHAIN_ENDPOINT: ${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
-      
-      # Qdrant Cloud (Vector Store for RAG)
-      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      # Qdrant Vector Store
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-false}
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-chat_memory}
       
       # Security
-      SECRET_KEY: ${SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY:-dev-insecure-secret-key-32-chars-minimum-length}
       ALGORITHM: ${ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
@@ -70,14 +109,8 @@ services:
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@example.com}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@inventory.local}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin1234!}
       ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-System Administrator}
-      
-      # Redis / Celery Broker (Upstash Cloud Redis)
-      REDIS_URL: ${REDIS_URL:-}
-      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
-      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
-      REDIS_ENABLED: ${REDIS_ENABLED:-true}
       
       # Rate Limiting
       RATE_LIMIT_DEFAULT: ${RATE_LIMIT_DEFAULT:-60/minute}
@@ -92,8 +125,7 @@ services:
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-InvIQ Smart Inventory}
       
-      # External APIs & Storage
-      GOOGLE_OAUTH_VERIFY_URL: ${GOOGLE_OAUTH_VERIFY_URL:-https://www.googleapis.com/oauth2/v3/userinfo}
+      # Storage
       AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
       AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
       AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
@@ -112,37 +144,33 @@ services:
     networks:
       - inviq_network
 
-  # ── 2. Celery Worker (Heavy Asynchronous Tasks) ───────────────────────────
+  # ── 4. Celery Worker (Asynchronous Task Processing Engine) ────────────────
   celery_worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: inviq_celery_worker
+    container_name: inviq_dev_celery_worker
     restart: unless-stopped
     command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
     working_dir: /app/backend
     depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       app:
         condition: service_started
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       PROJECT_NAME: "Smart Inventory Assistant"
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL:-}
-      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
-      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/inviq_dev}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
-      SECRET_KEY: ${SECRET_KEY}
-      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      SECRET_KEY: ${SECRET_KEY:-dev-insecure-secret-key-32-chars-minimum-length}
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-false}
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       SMTP_ENABLED: ${SMTP_ENABLED:-false}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
-      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-InvIQ Smart Inventory}
       AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
       AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
       AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
@@ -152,33 +180,39 @@ services:
     networks:
       - inviq_network
 
-  # ── 3. Celery Beat (Periodic Recurring Job Scheduler) ─────────────────────
+  # ── 5. Celery Beat (Periodic Job Scheduler) ───────────────────────────────
   celery_beat:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: inviq_celery_beat
+    container_name: inviq_dev_celery_beat
     restart: unless-stopped
     command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info"]
     working_dir: /app/backend
     depends_on:
+      redis:
+        condition: service_healthy
       celery_worker:
         condition: service_started
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-production}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       PROJECT_NAME: "Smart Inventory Assistant"
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL:-}
-      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
-      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@db:5432/inviq_dev}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
-      SECRET_KEY: ${SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY:-dev-insecure-secret-key-32-chars-minimum-length}
     volumes:
       - ./logs:/app/logs
     networks:
       - inviq_network
 
-# ── Networks ───────────────────────────────────────────────────────────────
+# ── Volumes & Networks ─────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
 networks:
   inviq_network:
     driver: bridge

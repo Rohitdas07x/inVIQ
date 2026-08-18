@@ -33,7 +33,7 @@ jobs:
       REFRESH_TOKEN_EXPIRE_DAYS: "7"
 
       # ── App ───────────────────────────────────────────────────────────
-      ENVIRONMENT: testing
+      ENVIRONMENT: development
       PROJECT_NAME: "InvIQ CI"
       FRONTEND_URL: "http://localhost:5173"
       CORS_ORIGINS: "http://localhost:5173"
@@ -84,7 +84,7 @@ jobs:
             --quiet \
             --no-header \
             --timeout=120 \
-            --ignore=tests/test_qdrant.py \
+            --ignore=tests/test_vector_memory.py \
             --ignore=tests/test_chat.py \
             -x
 

@@ -1,0 +1,170 @@
+# ── Docker Compose: InvIQ Production Stack ────────────────────────────────────
+# Architecture (Production):
+#   1. app: FastAPI Web API (REST, GraphQL, WebSockets)
+#   2. celery_worker: Asynchronous task processing engine
+#   3. celery_beat: Periodic scheduler for FEFO, stock shortage & cold-chain checks
+#
+# Cloud Infrastructure:
+#   - Database: Supabase PostgreSQL (via DATABASE_URL)
+#   - Redis Broker & Cache: Upstash Redis (via REDIS_URL)
+#   - Vector Store: Qdrant Cloud (via QDRANT_URL & QDRANT_API_KEY)
+#   - Blob Storage: Azure Blob Storage (via AZURE_STORAGE_CONNECTION_STRING)
+#
+# Usage (Production):
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml logs -f app
+#   docker compose -f docker-compose.prod.yml down
+
+services:
+  # ── 1. FastAPI Application ────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inviq_prod_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      # Application
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PROJECT_NAME: "Smart Inventory Assistant"
+      
+      # Database (Supabase PostgreSQL)
+      DATABASE_URL: ${DATABASE_URL}
+      
+      # Redis / Celery Broker (Upstash Redis)
+      REDIS_URL: ${REDIS_URL}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      
+      # Frontend & CORS
+      FRONTEND_URL: ${FRONTEND_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      
+      # AI / LLM (Groq)
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
+      
+      # LangSmith (Optional)
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-InvIQ}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_ENDPOINT: ${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+      
+      # Qdrant Cloud (Vector Store for RAG)
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-chat_memory}
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      
+      # Login Lockout
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-15}
+      
+      # Admin Accounts
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@inventory.local}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-System Administrator}
+      
+      # Rate Limiting
+      RATE_LIMIT_DEFAULT: ${RATE_LIMIT_DEFAULT:-60/minute}
+      RATE_LIMIT_AUTH: ${RATE_LIMIT_AUTH:-5/minute}
+      
+      # SMTP (Email Notifications)
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-InvIQ Smart Inventory}
+      
+      # Storage
+      AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
+      AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
+      AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+
+    volumes:
+      - ./logs:/app/logs
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    
+    networks:
+      - inviq_prod_network
+
+  # ── 2. Celery Worker (Heavy Asynchronous Tasks) ───────────────────────────
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inviq_prod_celery_worker
+    restart: always
+    command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    working_dir: /app/backend
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PROJECT_NAME: "Smart Inventory Assistant"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      SECRET_KEY: ${SECRET_KEY}
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
+      AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
+      AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - inviq_prod_network
+
+  # ── 3. Celery Beat (Periodic Recurring Job Scheduler) ─────────────────────
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inviq_prod_celery_beat
+    restart: always
+    command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info"]
+    working_dir: /app/backend
+    depends_on:
+      celery_worker:
+        condition: service_started
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PROJECT_NAME: "Smart Inventory Assistant"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      SECRET_KEY: ${SECRET_KEY}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - inviq_prod_network
+
+# ── Networks ───────────────────────────────────────────────────────────────
+networks:
+  inviq_prod_network:
+    driver: bridge
