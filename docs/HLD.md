@@ -72,160 +72,138 @@ Independent retail chemist shops and local pharmacy chains in Tier-2/3 cities lo
 
 ## 5. System Architecture
 
-### 5.1 Full Architecture Diagram
+### 5.1 Full-Stack Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CLIENT LAYER                                    │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  React 19 SPA (Vite)                                                 │  │
-│  │  - 5 Role-Based Portals (Super Admin, Admin, Manager, Staff,        │  │
-│  │    Vendor) + Guest Demo Mode                                         │  │
-│  │  - Landing Page                                                      │  │
-│  │  - WebSocket Client (real-time alerts)                              │  │
-│  │  - Auth Context (JWT token management)                              │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└────────────────────────────┬─────────────────────────────────────────────────┘
-                             │
-                             │ HTTPS/REST (56 endpoints)
-                             │ WebSocket (real-time)
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           API GATEWAY LAYER                                  │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  FastAPI Application (Python 3.11+)                                  │  │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
-│  │  │  Middleware Stack                                              │ │  │
-│  │  │  1. CORS (allow origins)                                       │ │  │
-│  │  │  2. Request Logger (UUID, timing)                              │ │  │
-│  │  │  3. Rate Limiter (slowapi - 5-60 req/min)                      │ │  │
-│  │  └────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                      │  │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
-│  │  │  Authentication & Authorization                                │ │  │
-│  │  │  - JWT token validation (access + refresh)                     │ │  │
-│  │  │  - Token blacklist check (Redis)                               │ │  │
-│  │  │  - Role-based access control (5-tier hierarchy)                │ │  │
-│  │  │  - Guest Demo Access (optional JWT validation on GET routes)   │ │  │
-│  │  │  - Multi-tenancy (org_id isolation)                            │ │  │
-│  │  └────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                      │  │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
-│  │  │  REST API Routes (56 endpoints)                                │ │  │
-│  │  │  /api/auth/*        - Authentication (21 endpoints)            │ │  │
-│  │  │  /api/inventory/*   - Inventory management (9 endpoints)       │ │  │
-│  │  │  /api/requisition/* - Requisition workflow (8 endpoints)       │ │  │
-│  │  │  /api/chat/*        - AI chatbot (5 endpoints)                 │ │  │
-│  │  │  /api/analytics/*   - Analytics REST reads (4 endpoints)       │ │  │
-│  │  │  /api/vendor/*      - Vendor uploads (3 endpoints)             │ │  │
-│  │  │  /api/superadmin/*  - Super admin (6 endpoints)                │ │  │
-│  │  │  /ws                - WebSocket (2 endpoints)                  │ │  │
-│  │  └────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                      │  │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
-│  │  │  GraphQL Analytics (Strawberry — read-only)                    │ │  │
-│  │  │  /graphql/analytics — 5 queries                                │ │  │
-│  │  │  · dashboardStats   - Chart data (cached 2 min)                │ │  │
-│  │  │  · heatmap          - Location×item grid (cached 5 min)        │ │  │
-│  │  │  · alerts(severity) - Critical/warning list (cached 5 min)     │ │  │
-│  │  │  · summary          - Health overview (cached 5 min)           │ │  │
-│  │  │  · stockHealth(...) - Ad-hoc filtered read (not cached)        │ │  │
-│  │  │  Role-aware field masking: privileged fields null for          │ │  │
-│  │  │  Guest/Vendor callers                                          │ │  │
-│  │  │  Shared Redis cache keys with REST layer                       │ │  │
-│  │  └────────────────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────┬─────────────────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          APPLICATION LAYER                                   │
-│                                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │  Inventory   │  │ Requisition  │  │   Vendor     │  │  Analytics   │   │
-│  │  Service     │  │  Service     │  │  Service     │  │  Service     │   │
-│  │              │  │              │  │              │  │              │   │
-│  │ - Stock calc │  │ - Approval   │  │ - Excel      │  │ - Dashboard  │   │
-│  │ - Reorder    │  │ - Workflow   │  │   parsing    │  │ - Heatmap    │   │
-│  │ - Tracking   │  │ - Inventory  │  │ - Fuzzy      │  │ - Alerts     │   │
-│  │              │  │   update     │  │   matching   │  │ - Caching    │   │
-│  │ └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
-│         │                 │                 │                 │            │
-│  ┌──────┴─────────────────┴─────────────────┴─────────────────┴────────┐   │
-│  │                      AI Agent Service                                │   │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │   │
-│  │  │  LangGraph ReAct Agent (Groq LLaMA 3.3 70B)                    │ │   │
-│  │  │  - Natural language query processing                           │ │   │
-│  │  │  - Multi-step reasoning                                        │ │   │
-│  │  │  - Tool selection & execution                                  │ │   │
-│  │  │  - Conversation history (last 6 messages)                      │ │   │
-│  │  │  - Vector context injection (RAG)                              │ │   │
-│  │  └────────────────────────────────────────────────────────────────┘ │   │
-│  │                                                                      │   │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │   │
-│  │  │  9 Agent Tools (@tool decorator)                               │ │   │
-│  │  │  1. get_inventory_overview()                                   │ │   │
-│  │  │  2. get_critical_items(location, severity)                     │ │   │
-│  │  │  3. get_stock_health(item, location)                           │ │   │
-│  │  │  4. calculate_reorder_suggestions(location)                    │ │   │
-│  │  │  5. get_location_summary(location_name)                        │ │   │
-│  │  │  6. get_category_analysis(category)                            │ │   │
-│  │  │  7. get_consumption_trends(item, location, days)               │ │   │
-│  │  │  8. get_near_expiry_items(days)                                │ │   │
-│  │  │  9. get_cold_chain_items(location)                             │ │   │
-│  │  └────────────────────────────────────────────────────────────────┘ │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  Audit Service                                                       │   │
-│  │  - Logs all write operations (create, update, delete, approve)      │   │
-│  │  - Tracks user, timestamp, action, entity, changes                  │   │
-│  │  └──────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────┬─────────────────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        INFRASTRUCTURE LAYER                                  │
-│                                                                              │
-│  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────┐  │
-│  │  PostgreSQL          │  │  Upstash Redis       │  │  Qdrant Cloud    │  │
-│  │  (Neon / Supabase)   │  │  (REST & Pub/Sub)    │  │  (Vector Store)  │  │
-│  │                      │  │                      │  │                  │  │
-│  │  Tables (13 total):  │  │  Channels & Keys:    │  │  Collection:     │  │
-│  │  - organizations     │  │  - inviq:ws:alerts   │  │  - chat_memory   │  │
-│  │  - users (Enum role) │  │  - token_blacklist:* │  │                  │  │
-│  │  - locations         │  │  - lockout:*         │  │  Embeddings:     │  │
-│  │  - items             │  │  - analytics:*       │  │  - 768 dims      │  │
-│  │  - inventory_trans   │  │  - cache:*           │  │  - Gemini        │  │
-│  │  - requisitions      │  │                      │  │    Embedding     │  │
-│  │  - requisition_items │  │  TTL:                │  │  - Semantic      │  │
-│  │  - vendor_uploads    │  │  - 2-5 min (cache)   │  │    search        │  │
-│  │  - vendor_invoices   │  │  - 30 min (tokens)   │  │  - Session-based │  │
-│  │  - data_import_jobs  │  │  - 15 min (lockout)  │  │    context       │  │
-│  │  - import_quarantine │  │                      │  │                  │  │
-│  │  - chat_sessions     │  │  Fallback:           │  │  Fallback:       │  │
-│  │  - chat_messages     │  │  - In-memory dict    │  │  - Disabled      │  │
-│  │  - audit_logs        │  │    with TTL & SCAN   │  │    gracefully    │  │
-│  │                      │  │                      │  │                  │  │
-│  │  Features:           │  │  Pub/Sub:            │  │                  │  │
-│  │  - ACID compliance   │  │  - Cross-process WS  │  │                  │  │
-│  │  - Composite Indexes │  │    broadcast         │  │                  │  │
-│  │  - DB Enums          │  │                      │  │                  │  │
-│  │  - Connection pool   │  │                      │  │                  │  │
-│  │  - Alembic migrations│  │                      │  │                  │  │
-│  └──────────────────────┘  └──────────────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph ClientLayer["🖥️ Client Layer (React 19 SPA)"]
+        Landing["🌐 Public Portal & Onboarding Wizard"]
+        AdminPort["🛡️ Chemist Admin Dashboard & Org Settings"]
+        StaffPort["💊 Counter Staff Portal (Permitted Branches)"]
+        VendorPort["🚚 Wholesaler / Distributor Manifest Portal"]
+        BarcodeScanner["🔫 USB / Bluetooth / Camera Barcode Scanner"]
+    end
+
+    subgraph APIGateway["🚪 API Gateway & Security Perimeter (FastAPI)"]
+        CORS["CORS & Host Whitelist"]
+        SecHeaders["🛡️ Security Headers & Content Security Policy"]
+        RateLimiter["⚡ SlowAPI Moving-Window Limiter (Upstash Redis)"]
+        AuthGuard["🔑 JWT Authentication & Token Blacklist"]
+        TenantResolver["🏢 Multi-Tenant Scoping Engine (org_id Enforcer)"]
+        RESTEngine["REST API Routing (60+ Scoped Endpoints)"]
+        GQLAnalytics["GraphQL Analytics Subgraph (/graphql/analytics)"]
+        WSAlerts["WebSocket Event Stream (/ws/alerts)"]
+    end
+
+    subgraph BusinessLayer["⚙️ Domain & Application Layer"]
+        InvService["InventoryService & Barcode Dispenser<br/>• Batch-Aware FEFO Deductions<br/>• Redis Distributed Locking (SETNX)"]
+        AnalyticsService["AnalyticsService & Stockout Shield<br/>• 30/60/90 Day Expiry Forecasting<br/>• Tenant-Scoped Cache Keys"]
+        ReqService["RequisitionService<br/>• Store Requisitions State Machine<br/>• Atomic Deductions on Fulfillment"]
+        VendorService["VendorService<br/>• Excel Manifest Processing<br/>• PDF Invoices to Azure Blob"]
+        DataImportService["DataImportService<br/>• 2-Pass AI / Synonym Mapping<br/>• Quarantine Error Storage"]
+        AgentService["AgentService & ReAct Chatbot<br/>• LangGraph Multi-Step Reasoning<br/>• Multilingual Voice STT (Sarvam)"]
+        ReportService["ReportService & PdfService<br/>• Vector PDF Compilations (ReportLab)"]
+        NotificationService["NotificationService<br/>• Scoped Low-Stock Mailings (SMTP)"]
+        CacheService["CacheService<br/>• L1 Memory + L2 Upstash REST<br/>• Non-blocking Pattern Invalidation"]
+    end
+
+    subgraph BackgroundWorkers["⚡ Celery Background Task Queues"]
+        CeleryWorker["Celery Worker Engine (Redis Broker)"]
+        TaskImport["📄 Bulk CSV Import Task"]
+        TaskInvoice["🧾 PDF Invoice Generation Task"]
+        TaskVector["🧠 Vector Embeddings Sync Task"]
+        TaskEmail["📧 Transactional Email Task"]
+        CeleryBeat["⏰ Celery Beat Scheduled Audits<br/>• FEFO Expiry Checks (6h)<br/>• Stock Shortage Audits (1h)<br/>• Cold-Chain Monitoring (30m)"]
+    end
+
+    subgraph DataPersistence["💾 Persistence & External Cloud Infrastructure"]
+        PostgresDB[("🐘 PostgreSQL / Neon<br/>Strict org_id Row Isolation<br/>B-Tree & Composite Indexes")]
+        UpstashRedis[("⚡ Upstash Redis<br/>• Distributed Lock (Redlock)<br/>• Token Blacklist & WS Tickets<br/>• Org Pub/Sub: inviq:events:org:{id}")]
+        QdrantCloud[("🧠 Qdrant Cloud Vector DB<br/>Gemini 768-dim Embeddings<br/>Tenant Payload Filtering")]
+        AzureStorage[("☁️ Azure Blob Storage<br/>Invoices, Reports & Manifests")]
+        GroqLLM["⚡ Groq Cloud (LLaMA 3.3 70B)"]
+        SarvamSTT["🎙️ Sarvam AI (Saaras v3 STT)"]
+    end
+
+    %% Client Layer to Gateway
+    Landing --> CORS
+    AdminPort --> CORS
+    StaffPort --> CORS
+    VendorPort --> CORS
+    BarcodeScanner --> CORS
+    CORS --> SecHeaders --> RateLimiter --> AuthGuard --> TenantResolver
+    TenantResolver --> RESTEngine
+    TenantResolver --> GQLAnalytics
+    TenantResolver --> WSAlerts
+
+    %% Gateway to Business Services
+    RESTEngine --> InvService
+    RESTEngine --> AnalyticsService
+    RESTEngine --> ReqService
+    RESTEngine --> VendorService
+    RESTEngine --> DataImportService
+    RESTEngine --> AgentService
+    GQLAnalytics --> AnalyticsService
+    WSAlerts --> InvService
+
+    %% Services to Async Queues
+    DataImportService -.-> TaskImport -.-> CeleryWorker
+    VendorService -.-> TaskInvoice -.-> CeleryWorker
+    AgentService -.-> TaskVector -.-> CeleryWorker
+    NotificationService -.-> TaskEmail -.-> CeleryWorker
+    CeleryBeat --> CeleryWorker
+
+    %% Services to Storage & External
+    InvService --> PostgresDB
+    InvService --> UpstashRedis
+    InvService --> CacheService
+    AnalyticsService --> PostgresDB
+    AnalyticsService --> CacheService
+    CacheService --> UpstashRedis
+    ReqService --> PostgresDB
+    VendorService --> PostgresDB
+    VendorService --> AzureStorage
+    DataImportService --> PostgresDB
+    AgentService --> GroqLLM
+    AgentService --> QdrantCloud
+    AgentService --> SarvamSTT
+    ReportService --> PostgresDB
+    NotificationService --> PostgresDB
 ```
 
-### 5.2 Component Responsibilities
+---
+
+### 5.2 Multi-Tenant Data Isolation Architecture
+
+```mermaid
+graph TD
+    subgraph MultiTenantIsolation["🏢 Multi-Tenant Scoping Boundaries"]
+        TenantHeader["Incoming Request with JWT / Ticket"]
+        Context["Dependencies: get_current_user & get_caller_org_id"]
+        
+        subgraph IsolationGuards["Strict Invariants"]
+            G1["1. Database: Model.org_id == caller_org_id"]
+            G2["2. Cache: cache:{org_id}:* namespace"]
+            G3["3. Pub/Sub: inviq:events:org:{org_id}"]
+            G4["4. Vector RAG: Filter(org_id == caller_org_id)"]
+            G5["5. Workers: Celery Task Payload (org_id required)"]
+        end
+        
+        TenantHeader --> Context
+        Context --> G1
+        Context --> G2
+        Context --> G3
+        Context --> G4
+        Context --> G5
+    end
+```
+
+### 5.3 Component Responsibilities
 
 | Component | Responsibility |
 |-----------|---------------|
 | **React Frontend** | Single responsive SPA (Desktop Sidebar / Mobile Bottom Nav), 4 role-based views (Super Admin, Admin, Staff, Vendor) + Guest Demo Mode, real-time WebSocket updates |
-| **FastAPI Backend** | REST API (58+ endpoints), JWT authentication, business logic orchestration |
+| **FastAPI Backend** | REST API (60+ endpoints), JWT authentication, business logic orchestration |
 | **Domain Layer** | Repository protocols (Protocol classes), value objects (StockStatus, StockThresholds, ReorderPolicy), domain calculations |
 | **GraphQL Layer (Strawberry)** | Read-only analytics API at `/graphql/analytics` — 5 queries, role-aware field masking, shared Redis cache with REST |
 | **AI Agent Service** | LangGraph ReAct agent with 9 tools, natural language processing, voice transcription (Sarvam AI) |
@@ -243,295 +221,228 @@ Independent retail chemist shops and local pharmacy chains in Tier-2/3 cities lo
 
 ## 6. Detailed Request/Response Flows
 
-### 6.1 User Login Flow
-```
-User enters credentials
-         ↓
-Frontend → POST /api/auth/login
-         ↓
-┌────────────────────────────────────────┐
-│  Auth Route                            │
-│  1. Check login attempts (Redis)       │
-│  2. If locked → 429 error              │
-│  3. Query user from database           │
-│  4. Verify password (Argon2)           │
-│  5. If fail → increment attempts       │
-│  6. If success:                        │
-│     - Generate access token (30 min)   │
-│     - Generate refresh token (7 days)  │
-│     - Clear login attempts             │
-│     - Create audit log                 │
-└────────────────────────────────────────┘
-         ↓
-Response: {access_token, refresh_token, user}
-         ↓
-Frontend stores tokens in localStorage
-         ↓
-Frontend redirects to role-based portal
-```
-**Security Layers:**
-- Rate limiting: 5 requests/minute
-- Login lockout: 5 attempts → 15 min lockout
-- Argon2 password hashing (GPU-resistant)
-- Timing-attack prevention (DUMMY_HASH)
-- Audit logging
+### 6.1 User Authentication & Cookie Session Flow
 
-### 6.2 AI Chatbot Query Flow
-```
-User asks: "What items are critical?"
-         ↓
-Frontend → POST /api/chat/query
-         ↓
-┌────────────────────────────────────────┐
-│  Chat Route                            │
-│  1. Validate JWT token                 │
-│  2. Check rate limit (20/min)          │
-│  3. Load conversation history (last 6) │
-│  4. Query vector store for context     │
-└────────────────────────────────────────┘
-         ↓
-┌────────────────────────────────────────┐
-│  Agent Service                         │
-│  1. Build message context:             │
-│     - System prompt                    │
-│     - Vector context (RAG)             │
-│     - Conversation history             │
-│     - User question                    │
-│  2. Invoke LangGraph ReAct agent       │
-│  3. Agent decides which tools to call  │
-│  4. Execute tools (e.g., get_critical) │
-│  5. Agent synthesizes response         │
-│  6. Timeout: 30 seconds                │
-└────────────────────────────────────────┘
-         ↓
-┌────────────────────────────────────────┐
-│  Tool Execution                        │
-│  get_critical_items(severity="CRITICAL")│
-│  1. Query database with filters        │
-│  2. Calculate stock levels             │
-│  3. Return critical items list         │
-└────────────────────────────────────────┘
-         ↓
-┌────────────────────────────────────────┐
-│  Save Response                         │
-│  1. Save to chat_messages table        │
-│  2. Save to Qdrant Cloud (vector store)│
-│  3. Return response to user            │
-└────────────────────────────────────────┘
-         ↓
-Frontend displays answer + suggested actions
-```
-**Performance:**
-- Vector search (Qdrant Cloud): < 40ms
-- LLM inference (Groq Llama-3.3-70b): 1-2 seconds
-- Voice STT (Sarvam AI saaras:v3): < 1.5 seconds
-- Total response time: 2-3 seconds
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 User
+    participant Web as 💻 React SPA
+    participant AuthAPI as 🚪 Auth Controller (/api/auth/login)
+    participant Lockout as ⚡ Upstash Redis (Lockout Tracker)
+    participant DB as 🐘 PostgreSQL DB
+    participant Audit as 📜 AuditService
 
-### 6.3 Requisition Approval Flow
+    User->>Web: Submits credentials (username, password)
+    Web->>AuthAPI: POST /api/auth/login
+    AuthAPI->>Lockout: Check failed attempts (lockout:{username})
+    alt Account is Locked (>5 failed attempts)
+        Lockout-->>AuthAPI: 429 Too Many Requests
+        AuthAPI-->>Web: Lockout notification (15m remaining)
+    else Under Threshold
+        AuthAPI->>DB: Fetch user by username
+        alt User Exists & Password Valid (Argon2id)
+            AuthAPI->>Lockout: Reset lockout attempts
+            AuthAPI->>Audit: Record successful login
+            AuthAPI-->>Web: 200 OK + Set-Cookie (access_token, refresh_token, HttpOnly, SameSite=Lax)
+            Web->>Web: Store user profile & redirect to dashboard
+        else Invalid Credentials
+            AuthAPI->>Lockout: Increment failed attempts (INCR + EXPIRE 900)
+            AuthAPI->>Audit: Record failed login attempt
+            AuthAPI-->>Web: 401 Unauthorized ("Invalid credentials")
+        end
+    end
 ```
-Staff creates requisition
-         ↓
-Frontend → POST /api/requisition/create
-         ↓
-┌────────────────────────────────────────┐
-│  Requisition Service                   │
-│  1. Validate items exist               │
-│  2. Create Requisition (PENDING)       │
-│  3. Create RequisitionItems (line)     │
-│  4. Save to database                   │
-│  5. Create audit log                   │
-└────────────────────────────────────────┘
-         ↓
-Manager receives notification (WebSocket)
-         ↓
-Manager reviews requisition
-         ↓
-Frontend → PUT /api/requisition/{id}/approve
-         ↓
-┌────────────────────────────────────────┐
-│  Requisition Service                   │
-│  1. Check user role (manager+)         │
-│  2. Update status → APPROVED           │
-│  3. For each item:                     │
-│     - Create inventory transaction     │
-│     - Update stock levels              │
-│  4. Invalidate cache (analytics:*)     │
-│  5. Create audit log                   │
-└────────────────────────────────────────┘
-         ↓
-WebSocket broadcast to location
-         ↓
-Staff receives approval notification
-```
-**Transaction Safety:**
-- Database transaction (rollback on error)
-- Foreign key constraints
-- Audit trail for compliance
 
-### 6.4 Vendor Excel Upload Flow
-```
-Vendor uploads Excel file (50 items)
-         ↓
-Frontend → POST /api/vendor/upload-delivery
-         ↓
-┌────────────────────────────────────────┐
-│  Vendor Service                        │
-│  1. Parse Excel (openpyxl)             │
-│  2. For each row:                      │
-│     a. Extract: item_name, qty, batch  │
-│     b. Fuzzy match item (RapidFuzz)    │
-│        - Threshold: 85%                │
-│        - Returns best match            │
-│     c. Validate quantity > 0           │
-│     d. Create transaction (received)   │
-│     e. Track success/error             │
-│  3. Create VendorUpload record         │
-│  4. Invalidate cache                   │
-│  5. Create audit log                   │
-└────────────────────────────────────────┘
-         ↓
-Response: {total: 50, success: 48, errors: 2}
-         ↓
-Frontend shows success/error breakdown
-         ↓
-WebSocket alert to location (new stock)
-```
-**Error Handling:**
-- Partial success (48/50 items)
-- Error details per row
-- Transaction per item (isolated failures)
+### 6.2 AI Chatbot Query & RAG Memory Flow
 
-### 6.5 Real-Time Alert Flow (WebSocket)
-```
-Stock level drops below threshold
-         ↓
-Inventory transaction created
-         ↓
-┌────────────────────────────────────────┐
-│  Inventory Service                     │
-│  1. Calculate new stock level          │
-│  2. Check if critical (< reorder)      │
-│  3. If critical:                       │
-│     - Trigger WebSocket broadcast      │
-└────────────────────────────────────────┘
-         ↓
-┌────────────────────────────────────────┐
-│  WebSocket Manager                     │
-│  1. Get all connections for location   │
-│  2. Broadcast alert message:           │
-│     {                                  │
-│       type: "critical_stock",          │
-│       item: "Paracetamol",             │
-│       location: "Main Pharmacy",       │
-│       current: 5,                      │
-│       reorder: 20                      │
-│     }                                  │
-└────────────────────────────────────────┘
-         ↓
-All connected clients receive alert
-         ↓
-Frontend shows toast notification
-```
-**WebSocket Features:**
-- Connection per user session
-- Location-based broadcasting
-- Automatic reconnection
-- Heartbeat ping/pong
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 Chemist / Owner
+    participant Web as 💻 React SPA
+    participant ChatAPI as 🤖 Chat Controller (/api/chat/query)
+    participant VectorDB as 🧠 Qdrant Cloud (Vector Store)
+    participant Groq as ⚡ Groq Cloud (LLaMA 3.3 70B)
+    participant Tools as ⚙️ Agent Tools (DB Queries)
+    participant DB as 🐘 PostgreSQL DB
 
-### 6.6 Low-Stock Email Alert Flow
+    User->>Web: Submits natural language question ("What items are near expiry?")
+    Web->>ChatAPI: POST /api/chat/query { message, session_id }
+    ChatAPI->>VectorDB: Semantic search (Filter: org_id == current_org)
+    VectorDB-->>ChatAPI: Return top-3 relevant context chunks
+    ChatAPI->>Groq: Prompt with System Rules, Vector Context & Conversation History
+    Groq-->>ChatAPI: Tool Call: get_near_expiry_items(days=30, org_id=1)
+    ChatAPI->>Tools: Execute get_near_expiry_items()
+    Tools->>DB: Query inventory_transactions with expiry_date filter
+    DB-->>Tools: 3 items expiring within 30 days
+    Tools-->>ChatAPI: Formatted tool output
+    ChatAPI->>Groq: Feed tool results back to LLM
+    Groq-->>ChatAPI: Synthesized final answer with actionable recommendations
+    ChatAPI->>DB: Save user & assistant messages to chat_messages
+    ChatAPI->>VectorDB: Asynchronously embed & store new interaction
+    ChatAPI-->>Web: 200 OK { response, suggested_actions }
 ```
-Stock level drops below threshold
-         ↓
-Inventory transaction created
-         ↓
-┌────────────────────────────────────────┐
-│  Inventory Service                     │
-│  1. Check if stock <= min_stock        │
-│  2. Query active Admins & Managers     │
-│  3. Spin up background daemon thread   │
-│  4. Return HTTP response immediately   │
-└────────────────────────────────────────┘
-         ↓ (Asynchronous execution in background thread)
-┌────────────────────────────────────────┐
-│  Background Thread: NotificationSvc    │
-│  1. Establish SMTP TLS connection      │
-│  2. Build HTML alert template          │
-│  3. Dispatch email to recipient list   │
-│  4. Mask email PII and log completion  │
-└────────────────────────────────────────┘
-         ↓
-Admins & Managers receive email warning
+
+### 6.3 Requisition Lifecycle Flow (`PENDING` → `APPROVED` → `FULFILLED`)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Staff as 💊 Branch Staff
+    actor Admin as 🛡️ Chemist Admin
+    participant API as ⚡ FastAPI Backend
+    participant DB as 🐘 PostgreSQL DB
+    participant WS as 📡 WebSocket (Redis Pub/Sub)
+
+    Staff->>API: POST /api/requisition/create { location_id, items: [...] }
+    API->>DB: Verify branch access & insert Requisition (status: PENDING)
+    DB-->>API: Requisition created (REQ-202608-001)
+    API->>WS: Broadcast to org channel (inviq:events:org:1, topic: requisition.created)
+    WS-->>Admin: Real-time UI notification on admin dashboard
+
+    Admin->>API: PUT /api/requisition/{id}/approve
+    API->>DB: Update status to APPROVED (record approved_by, approved_at)
+    API->>WS: Broadcast requisition.approved
+    WS-->>Staff: Real-time status update to branch counter
+
+    Staff->>API: PUT /api/requisition/{id}/fulfill
+    API->>DB: Atomic stock transaction: received += req.quantity on branch
+    API->>DB: Update status to FULFILLED
+    API-->>Staff: 200 OK (Stock updated & requisition closed)
 ```
-**Email Alerts Features:**
-- **Zero Latency Impact:** Uses Python `threading.Thread(daemon=True)` to offload SMTP overhead, maintaining high response times.
-- **PII Protection:** Leverages a `mask_email` security helper to ensure no plain-text emails are written to standard logs or diagnostic systems.
-- **Isolated Transactions:** Exceptions raised by the email dispatch are caught at the thread level, meaning network or mail-server outages never rollback or halt inventory updates.
+
+### 6.4 Data Import & Quarantine Error Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as 🛡️ Chemist Admin
+    participant Web as 💻 React SPA
+    participant API as ⚡ Data Import API
+    participant AI as ⚡ AI / Synonym Mapper
+    participant Celery as ⚡ Celery Worker
+    participant DB as 🐘 PostgreSQL DB
+
+    Admin->>Web: Uploads raw distributor CSV / Excel file
+    Web->>API: POST /api/data-import/preview
+    API->>AI: 2-Pass Heuristic & LLM column synonym detection
+    AI-->>API: Suggested column mappings with confidence scores
+    API-->>Web: Preview rows & mapping recommendations
+
+    Admin->>Web: Confirms column mapping & clicks "Import"
+    Web->>API: POST /api/data-import/confirm
+    API->>Celery: Queue import_csv_task(org_id, job_id, file_path)
+    Celery->>DB: Parse rows, validate schema & foreign keys
+    alt Valid Row
+        Celery->>DB: Insert / Update Item & Ledger Transaction
+    else Invalid Row (Missing MRP, negative price, invalid date)
+        Celery->>DB: Insert into import_quarantine table with error reason
+    end
+    Celery->>DB: Update DataImportJob status (COMPLETED / PARTIAL)
+    Celery-->>Admin: WebSocket event: import.completed (Success: 98, Quarantined: 2)
+```
+
+### 6.5 Real-Time WebSocket & Redis Pub/Sub Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as 💻 React Client
+    participant WSAPI as ⚡ WebSocket Endpoint (/ws/alerts)
+    participant Redis as ⚡ Upstash Redis (Pub/Sub & Tickets)
+    participant Backend as ⚙️ Domain Services
+
+    Client->>WSAPI: POST /api/auth/ws-ticket (Authenticated via Cookie)
+    WSAPI->>Redis: Generate single-use ticket (TTL: 30s)
+    Redis-->>WSAPI: Ticket UUID: 4f2a-9e1b
+    WSAPI-->>Client: Return { ticket: "4f2a-9e1b" }
+    
+    Client->>WSAPI: Connect wss://.../ws/alerts?ticket=4f2a-9e1b
+    WSAPI->>Redis: Atomically validate & delete ticket (Single-use)
+    WSAPI-->>Client: Connection Accepted (Assigned to Org Channel: inviq:events:org:1)
+
+    Note over Backend,Redis: Domain Event Triggered (e.g. Stock Below Threshold)
+    Backend->>Redis: PUBLISH inviq:events:org:1 { event: "stock.low", item: "Pan-D" }
+    Redis-->>WSAPI: Subscriber receives message on inviq:events:org:1
+    WSAPI-->>Client: Stream event JSON to active socket
+```
 
 ---
 
 ## 7. Authentication & Authorization Architecture
 
-### 7.1 JWT Token Flow
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Token Generation (Login)                                       │
-│                                                                  │
-│  1. User authenticates                                          │
-│  2. Generate access token:                                      │
-│     {                                                           │
-│       sub: user_id,                                             │
-│       username: "admin",                                        │
-│       role: "admin",                                            │
-│       type: "access",                                           │
-│       exp: now + 30 minutes                                     │
-│     }                                                           │
-│  3. Generate refresh token:                                     │
-│     {                                                           │
-│       sub: user_id,                                             │
-│       type: "refresh",                                          │
-│       exp: now + 7 days                                         │
-│     }                                                           │
-│  4. Sign with SECRET_KEY (HS256)                                │
-└─────────────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Token Validation (Every Request)                               │
-│                                                                  │
-│  1. Extract token from Authorization header                     │
-│  2. Decode and verify signature                                 │
-│  3. Check expiry                                                │
-│  4. Verify type = "access"                                      │
-│  5. Check token blacklist (Redis)                               │
-│  6. Query user from database                                    │
-│  7. Check user is_active                                        │
-│  8. Inject user into request context                            │
-└─────────────────────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  Role-Based Access Control                                      │
-│                                                                  │
-│  Role Hierarchy:                                                │
-│  super_admin (6) > admin (5) > manager (4) >                    │
-│  staff (3) > vendor (2)                                         │
-│                                                                  │
-│  Endpoint Protection:                                           │
-│  - /api/superadmin/* → super_admin only                         │
-│  - /api/admin/* → admin+ (Management routes require admin auth)  │
-│  - /api/requisition/approve/reject → manager+                   │
-│  - /api/requisition/create → staff+                             │
-│  - /api/vendor/* → vendor+                                      │
-│  - GET /api/{inventory,requisition,chat,analytics}/* → Guest    │
-│    Permitted (uses optional JWT validation; no 401 raises)      │
-└─────────────────────────────────────────────────────────────────┘
+### 7.1 JWT & Cookie Lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as 💻 Browser Client
+    participant Auth as 🚪 Auth Routes
+    participant Guard as 🛡️ Auth Middleware
+    participant Blacklist as ⚡ Upstash Redis Token Blacklist
+
+    Note over Client,Auth: 1. Login & Token Issuance
+    Client->>Auth: POST /api/auth/login
+    Auth-->>Client: Set HttpOnly SameSite Cookies (access_token: 30m, refresh_token: 7d)
+
+    Note over Client,Guard: 2. Authenticated API Request
+    Client->>Guard: GET /api/inventory/summary (Cookies automatically attached)
+    Guard->>Guard: Verify JWT signature & expiration
+    Guard->>Blacklist: Check if token jti is blacklisted
+    alt Token Active
+        Guard-->>Client: 200 OK (Protected Data)
+    else Token Revoked
+        Guard-->>Client: 401 Unauthorized ("Token has been revoked")
+    end
+
+    Note over Client,Auth: 3. Logout & Token Revocation
+    Client->>Auth: POST /api/auth/logout
+    Auth->>Blacklist: SET blacklist:{access_jti} EX 1800
+    Auth->>Blacklist: SET blacklist:{refresh_jti} EX 604800
+    Auth-->>Client: Clear-Cookie & 200 OK
 ```
 
-### 7.2 Multi-Tenancy Isolation
-- Every table has an `org_id` column to isolate organization data.
-- Every query filters by `org_id` automatically or within context dependency.
-- Users can only access data belonging to their organization's `org_id`.
-- The `super_admin` role can bypass this filter to perform cross-organization platform administration.
+### 7.2 4-Tier Role Hierarchy & Permissions Matrix
+
+```mermaid
+graph TD
+    subgraph RoleHierarchy["👑 4-Tier Role Hierarchy"]
+        SuperAdmin["super_admin (Level 4 - Platform Governance)"]
+        Admin["admin (Level 3 - Pharmacy / Chemist Store Owner)"]
+        Staff["staff (Level 2 - Counter Pharmacist / Billing Staff)"]
+        Vendor["vendor (Level 1 - Medicine Wholesaler / Distributor)"]
+        
+        SuperAdmin --> Admin
+        Admin --> Staff
+        Staff --> Vendor
+    end
+```
+
+| Permission / Capability | `super_admin` | `admin` | `staff` | `vendor` |
+|:---|:---:|:---:|:---:|:---:|
+| **Multi-Tenant Org Creation & Provisioning** | ✅ | ❌ | ❌ | ❌ |
+| **Pharmacy Settings & Branch Location Config** | ✅ | ✅ | ❌ | ❌ |
+| **Staff & Supplier Account Management** | ✅ | ✅ | ❌ | ❌ |
+| **Requisition Approvals & Rejections** | ✅ | ✅ | ❌ | ❌ |
+| **Barcode Quick Dispense (`/scan-dispense`)** | ✅ | ✅ | ✅ (Assigned Branch) | ❌ |
+| **Create Stock Requisitions** | ✅ | ✅ | ✅ (Assigned Branch) | ❌ |
+| **Upload Wholesaler Excel Delivery Manifests** | ✅ | ✅ | ❌ | ✅ (Assigned Locations) |
+| **Download PDF Delivery Invoices** | ✅ | ✅ | ❌ | ✅ (Own Invoices) |
+| **View Audit Trail & System Security Logs** | ✅ | ✅ (Own Org) | ❌ | ❌ |
+
+### 7.3 Multi-Tenancy Isolation Invariants
+
+InvIQ enforces non-negotiable multi-tenant boundaries at every architectural layer:
+
+1. **Database Tier**: Every tenant-owned table (`locations`, `items`, `inventory_transactions`, `requisitions`, `requisition_items`, `vendor_uploads`, `vendor_invoices`, `data_import_jobs`, `import_quarantine`, `chat_sessions`, `chat_messages`, `audit_logs`) has a non-nullable `org_id` column with composite B-Tree indexes (`(org_id, id)`, `(org_id, item_id, location_id)`).
+2. **Context Resolution**: Routes resolve tenant identity via `current_user.org_id` (`get_caller_org_id` / `get_current_user`). If a non-superadmin user has `org_id is None`, all operations are strictly rejected (`403 Forbidden`).
+3. **No Cross-Tenant Leaks**: Any attempt to read or mutate another tenant's resource returns `404 Not Found` or `403 Forbidden` without revealing whether the resource exists.
+4. **Cache & Pub/Sub Isolation**: Redis cache keys (`cache:{org_id}:*`) and Pub/Sub event channels (`inviq:events:org:{org_id}`) are partitioned per tenant.
+5. **Vector RAG Isolation**: Qdrant semantic searches apply metadata payload filtering (`Filter(must=[FieldCondition(key="org_id", match=MatchValue(value=org_id))])`) to guarantee that conversation memory and AI retrieval never cross tenant boundaries.
 
 ---
+
 
 ## 8. Tech Stack & Characteristics
 

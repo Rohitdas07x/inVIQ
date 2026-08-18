@@ -790,12 +790,84 @@ SHUTDOWN:
 
 ---
 
+## POST /api/inventory/scan-dispense
+
+**Trigger**: HTTP POST, counter pharmacist barcode scan
+
+**Path**:
+```
+api/routes/inventory.py:scan_dispense
+  → [limiter: 120/minute]
+  → Depends(require_staff)
+  → Depends(get_caller_org_id)
+  → inventory_service.dispense_by_barcode(db, barcode_or_id, location_id, qty, actor, org_id)
+      → redis_distributed_lock("lock:org_{org_id}:stock:{loc}:{item}") [Distributed Lock]
+      → DB SELECT items WHERE barcode == barcode_or_id AND org_id == org_id
+      → [verify caller permitted to location_id]
+      → DB SELECT inventory_transactions (batch-aware FEFO ordering: expiry_date ASC)
+      → [for batch in available_batches while qty > 0]
+          → InventoryRepository.create_transaction(issued=batch_qty, batch_number=batch, expiry_date=batch_exp)
+      → db.commit()
+      → cache_service.cache_invalidate_pattern(f"cache:{org_id}:*")
+      → [if stock <= min_stock]
+          → websocket.publish_domain_event("stock.low", org_id, alert_payload)
+          → NotificationService.send_low_stock_alerts_async(org_id, item, location, current_stock)
+      → return ScanDispenseResponse(remaining_stock, status, batch_info)
+```
+
+---
+
+## POST /api/auth/ws-ticket
+
+**Trigger**: HTTP POST, authenticated user requesting short-lived single-use WebSocket ticket
+
+**Path**:
+```
+api/routes/auth.py:issue_ws_ticket
+  → Depends(get_current_user)
+  → Generate UUID4 ticket string
+  → Set ticket in Upstash Redis: ws_ticket:{ticket} with 30s TTL
+  → Return {"ticket": ticket, "expires_in": 30}
+```
+
+---
+
+## Asynchronous Celery Workers Flow
+
+**Trigger**: Long-running background tasks dispatched via Celery
+
+**Path**:
+```
+app/workers/tasks.py
+  ├── import_csv_task(org_id, job_id, file_path, column_mapping, default_location_id)
+  │     → Validate caller org_id matches job.org_id
+  │     → Stream parse CSV/Excel rows
+  │     → Insert valid rows into inventory_transactions / items
+  │     → Insert invalid rows into import_quarantine table
+  │     → Update DataImportJob status (COMPLETED / FAILED)
+  │
+  ├── generate_invoice_pdf_task(org_id, upload_id)
+  │     → Render ReportLab vector PDF
+  │     → Upload to Azure Blob Storage / store in database
+  │     → Update vendor_invoices.pdf_path
+  │
+  ├── sync_vector_embeddings_task(org_id, conversation_id, texts)
+  │     → Generate 768-dim embeddings via Gemini/SentenceTransformer
+  │     → Upsert points to Qdrant Cloud collection with payload {"org_id": org_id}
+  │
+  └── send_email_notification_task(org_id, recipient, subject, body)
+        → Send transactional notification email via SMTP with exponential backoff retries
+```
+
+---
+
 ## ⚠️ Unreferenced / Notable Observations
 
 - **`get_optional_user` in `chat.py`** — imported (`from app.core.dependencies import get_current_user, get_optional_user`) but `get_optional_user` is only used in the `GET /chat/suggestions` route. The `POST /chat/query` route uses the strict `get_current_user`.
 - **`github-auth` route** — auth.py contains a `POST /github-auth` endpoint that calls GitHub's OAuth API. The full OAuth code-exchange flow is implemented. Verified present and wired.
 - **`InventoryService._get_recipient_emails` cache** — is a class-level mutable list shared across all instances. Thread-safe under the double-checked lock; TTL is 60 seconds.
-- **`vendor_upload` cache invalidation** — [RESOLVED] `POST /vendor/upload-delivery` calls `cache_invalidate_pattern("analytics:*")` on success.
-- **`pending_alerts` multi-worker pub/sub** — [RESOLVED] `queue_websocket_alert` publishes to Redis channel `inviq:ws:alerts`. Alerts are broadcast in real-time across workers via `start_redis_subscriber()`.
+- **`vendor_upload` cache invalidation** — [RESOLVED] `POST /vendor/upload-delivery` calls `cache_invalidate_pattern(f"cache:{org_id}:*")` on success.
+- **`pending_alerts` multi-worker pub/sub** — [RESOLVED] `publish_domain_event` publishes to Redis channels `inviq:events:org:{org_id}` and `inviq:ws:alerts`. Alerts are broadcast in real-time across workers via `start_redis_subscriber()`.
 - **`seed_chat_memory.py` and `seed_large_data.py`** (backend root) — standalone scripts for seeding Qdrant and DB data. Not wired into any route, cron, or lifecycle hook. Must be run manually.
+
 

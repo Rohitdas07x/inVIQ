@@ -294,7 +294,13 @@ class TestCookieAuthAndCSP:
 
 
     def test_security_headers_and_csp_present(self, client):
-        res = client.get("/health")
+        from unittest.mock import patch
+
+        with patch(
+            "app.infrastructure.cache.redis_client.is_redis_available",
+            return_value=True,
+        ):
+            res = client.get("/health")
         assert res.status_code == 200
         assert "Content-Security-Policy" in res.headers
         assert "X-Frame-Options" in res.headers
