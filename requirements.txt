@@ -1,9 +1,10 @@
 # ==========================================================================
 # InvIQ Smart Inventory Assistant — Production Dependencies
 # ==========================================================================
-# All packages required to run the application in any environment.
-# Dev-only tools (linters, test frameworks, debuggers, docs) live in
-# requirements-dev.txt — do NOT add them here.
+# I keep separate `requirements.txt` and `requirements-dev.txt` to separate **runtime dependencies
+# from development tools**. `requirements.txt` contains only what production needs, while `requirements-dev.txt`
+# also includes tools like Pytest and Ruff. This keeps the production Docker image **smaller, cleaner,
+# and easier to manage**.
 # ==========================================================================
 
 # -- Web Framework ----------------------------------------------------------
