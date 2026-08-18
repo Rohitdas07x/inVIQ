@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.infrastructure.database.connection import get_db_context
+from app.api.routes.websocket import publish_domain_event
 
 logger = logging.getLogger("smart_inventory.workers")
 
@@ -57,6 +58,9 @@ def import_csv_task(
     job_id: int,
     org_id: int,
     actor_id: int,
+    confirmed_mapping: Optional[Dict[str, Any]] = None,
+    default_location_id: Optional[int] = None,
+    username: Optional[str] = None,
     correlation_id: Optional[str] = None,
     idempotency_token: Optional[str] = None,
     db=None,
@@ -66,6 +70,7 @@ def import_csv_task(
     Carries full tenant isolation context and records execution state in DB.
     """
     correlation_id = correlation_id or str(uuid.uuid4())
+    username = username or f"user-{actor_id}"
     logger.info(
         "Executing CSV Import Task | Job ID: %s | Org ID: %s | Actor ID: %s | Correlation: %s",
         job_id, org_id, actor_id, correlation_id,
@@ -73,18 +78,45 @@ def import_csv_task(
 
     def _execute(session):
         from app.infrastructure.database.data_import_repo import DataImportRepository
+        from app.application.data_import_service import DataImportService
+
         repo = DataImportRepository(session)
         job = repo.get_job(job_id)
         if not job or job.org_id != org_id:
             logger.error("Unauthorized import job access in worker: job_id=%s, org_id=%s", job_id, org_id)
             return {"status": "error", "message": "Job not found or cross-tenant access"}
 
+        # Use confirmed mapping from argument or fallback to proposed mapping on job
+        mapping = confirmed_mapping or job.proposed_mapping or {}
 
+        service = DataImportService(session)
+        updated_job = service.execute_import(
+            job_id=job_id,
+            confirmed_mapping=mapping,
+            default_location_id=default_location_id,
+            entered_by=username,
+        )
+
+        # Publish domain event to notify clients of import completion
+        publish_domain_event(
+            topic="import.completed",
+            org_id=org_id,
+            payload={
+                "job_id": job_id,
+                "status": updated_job.status if updated_job else "COMPLETED",
+                "success_rows": updated_job.success_rows if updated_job else 0,
+                "quarantined_rows": updated_job.quarantined_rows if updated_job else 0,
+                "correlation_id": correlation_id,
+            },
+        )
 
         return {
             "status": "success",
             "job_id": job_id,
             "org_id": org_id,
+            "job_status": updated_job.status if updated_job else "COMPLETED",
+            "success_rows": updated_job.success_rows if updated_job else 0,
+            "quarantined_rows": updated_job.quarantined_rows if updated_job else 0,
             "correlation_id": correlation_id,
             "processed_at": datetime.utcnow().isoformat(),
         }
@@ -106,7 +138,7 @@ def generate_invoice_pdf_task(
     db=None,
 ) -> Dict[str, Any]:
     """
-    Asynchronously compiles and uploads PDF vendor invoices to Azure Blob Storage.
+    Asynchronously compiles and uploads PDF vendor invoices to Azure Blob Storage / database.
     """
     correlation_id = correlation_id or str(uuid.uuid4())
     logger.info(
@@ -116,15 +148,64 @@ def generate_invoice_pdf_task(
 
     def _execute(session):
         from app.application.vendor_service import VendorService
+        from app.application.invoice_pdf_service import InvoicePdfService
+        from app.infrastructure.storage.azure_blob_storage import get_storage_service
+
         svc = VendorService(session)
         invoice = svc.get_invoice(invoice_id, org_id=org_id)
         if not invoice:
             logger.error("Invoice %s not found for org %s", invoice_id, org_id)
             return {"status": "error", "message": "Invoice not found"}
 
+        # If PDF binary is not generated, compile it now
+        if not invoice.pdf_content:
+            invoice_payload = {
+                "invoice_number": invoice.invoice_number,
+                "invoice_date": invoice.invoice_date,
+                "line_items": invoice.line_items,
+                "subtotal": float(invoice.subtotal),
+                "tax_amount": float(invoice.tax_amount),
+                "total_amount": float(invoice.total_amount),
+                "status": invoice.status,
+            }
+            vendor_data = {
+                "username": f"vendor-{invoice.vendor_user_id}",
+                "full_name": "Authorized Vendor",
+                "email": "vendor@inviq.local",
+            }
+            location_data = {
+                "name": "Central Pharmacy Depot",
+                "type": "WAREHOUSE",
+                "region": "West Bengal",
+                "address": "Healthcare Distribution Center",
+            }
+
+            pdf_bytes = InvoicePdfService.generate_invoice_pdf(
+                invoice_data=invoice_payload,
+                vendor_data=vendor_data,
+                location_data=location_data,
+            )
+
+            # Upload to Azure Blob Storage
+            blob_path = f"invoices/{invoice.invoice_date.year}/{invoice.invoice_date.month:02d}/{invoice.invoice_number}.pdf"
+            storage = get_storage_service()
+            pdf_url = storage.upload_file(
+                file_bytes=pdf_bytes,
+                blob_name=blob_path,
+                content_type="application/pdf",
+            )
+            sas_url = storage.generate_sas_url(blob_path) if pdf_url else None
+
+            # Update invoice record
+            invoice.pdf_path = blob_path
+            invoice.pdf_url = sas_url or pdf_url
+            invoice.pdf_content = pdf_bytes
+            session.commit()
+
         return {
             "status": "success",
             "invoice_id": invoice_id,
+            "invoice_number": invoice.invoice_number,
             "org_id": org_id,
             "correlation_id": correlation_id,
         }
@@ -142,11 +223,13 @@ def sync_vector_embeddings_task(
     org_id: int,
     session_id: str,
     user_id: int,
+    text: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
     correlation_id: Optional[str] = None,
     db=None,
 ) -> Dict[str, Any]:
     """
-    Asynchronously generates Gemini embeddings and updates Qdrant vector memory collection.
+    Asynchronously generates embeddings and updates Qdrant vector memory collection.
     """
     correlation_id = correlation_id or str(uuid.uuid4())
     logger.info(
@@ -155,6 +238,20 @@ def sync_vector_embeddings_task(
     )
     from app.infrastructure.vector_store.vector_store import get_vector_memory
     memory = get_vector_memory()
+
+    if memory.is_available and text:
+        try:
+            memory.add_interaction(
+                session_id=session_id,
+                user_id=user_id,
+                user_message=text,
+                agent_response=metadata.get("response", "") if metadata else "",
+                context=metadata.get("context") if metadata else None,
+                org_id=org_id,
+            )
+        except Exception as exc:
+            logger.warning("Vector sync interaction failed: %s", exc)
+
     return {
         "status": "success" if memory.is_available else "skipped",
         "org_id": org_id,
@@ -191,34 +288,33 @@ def send_email_notification_task(
     }
 
 
-
 # ── 5. Scheduled Celery Beat Recurring Jobs ──────────────────────────────────
 
 @_task_wrapper(name="app.workers.tasks.celery_fefo_audit")
-def celery_fefo_audit(db=None):
+def celery_fefo_audit(org_id: Optional[int] = None, db=None):
     """Scheduled task: audits near-expiry batches across all active pharmacy stores."""
     from app.application.background_tasks import run_fefo_expiry_audit
     if db is not None:
-        return run_fefo_expiry_audit(db)
+        return run_fefo_expiry_audit(db, org_id=org_id)
     with get_db_context() as session:
-        return run_fefo_expiry_audit(session)
+        return run_fefo_expiry_audit(session, org_id=org_id)
 
 
 @_task_wrapper(name="app.workers.tasks.celery_stock_audit")
-def celery_stock_audit(db=None):
+def celery_stock_audit(org_id: Optional[int] = None, db=None):
     """Scheduled task: monitors stock thresholds and triggers low-stock alerts."""
     from app.application.background_tasks import run_stock_threshold_audit
     if db is not None:
-        return run_stock_threshold_audit(db)
+        return run_stock_threshold_audit(db, org_id=org_id)
     with get_db_context() as session:
-        return run_stock_threshold_audit(session)
+        return run_stock_threshold_audit(session, org_id=org_id)
 
 
 @_task_wrapper(name="app.workers.tasks.celery_cold_chain_check")
-def celery_cold_chain_check(db=None):
+def celery_cold_chain_check(org_id: Optional[int] = None, db=None):
     """Scheduled task: audits temperature compliance for cold-chain medications."""
     from app.application.background_tasks import run_cold_chain_health_check
     if db is not None:
-        return run_cold_chain_health_check(db)
+        return run_cold_chain_health_check(db, org_id=org_id)
     with get_db_context() as session:
-        return run_cold_chain_health_check(session)
+        return run_cold_chain_health_check(session, org_id=org_id)

@@ -27,10 +27,11 @@ pyjwt>=2.8.0
 pwdlib[argon2]>=0.2.0
 email-validator>=2.1.0
 
-# -- Caching & Rate Limiting ------------------------------------------------
+# -- Caching, Queues & Rate Limiting ----------------------------------------
 redis>=5.0.1
 upstash-redis>=1.1.0
 slowapi>=0.1.9
+celery>=5.3.6
 
 # -- AI & LLM ---------------------------------------------------------------
 langchain>=1.2.15

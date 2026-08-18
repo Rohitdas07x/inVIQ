@@ -72,8 +72,16 @@ export function WebSocketProvider({ children }) {
                     if (!isMounted) return;
                     try {
                         const data = JSON.parse(event.data);
-                        if (data.type === 'low_stock_alert') {
-                            setAlerts(prev => [data, ...prev].slice(0, 10));
+                        const alertTypes = [
+                            'low_stock_alert',
+                            'fefo_expiry_alert',
+                            'stock_critical_alert',
+                            'cold_chain_warning',
+                            'expiry.critical',
+                            'stock.low',
+                        ];
+                        if (alertTypes.includes(data.type) || alertTypes.includes(data.event_topic) || data.event_topic) {
+                            setAlerts(prev => [data, ...prev].slice(0, 15));
                         }
                         // Ignore pong frames silently
                     } catch (err) {

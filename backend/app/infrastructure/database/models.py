@@ -354,6 +354,8 @@ class DataImportJob(Base):
     mapping_result = Column(JSON, nullable=True)
     mapping_cache_hit = Column(Boolean, default=False)
     file_content = Column(LargeBinary, nullable=True)
+    file_blob_path = Column(String(500), nullable=True)
+    file_blob_url = Column(Text, nullable=True)
     is_background = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

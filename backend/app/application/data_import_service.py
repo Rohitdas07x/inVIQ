@@ -347,9 +347,21 @@ class DataImportService:
         quarantine_count = 0
         batch_size = settings.IMPORT_BATCH_SIZE
 
+        # Resolve file bytes from database column or Azure Blob Storage
+        file_bytes = job.file_content
+        if not file_bytes and job.file_blob_path:
+            from app.infrastructure.storage.azure_blob_storage import get_storage_service
+            storage = get_storage_service()
+            file_bytes = storage.download_file(job.file_blob_path)
+            if file_bytes:
+                logger.info("Downloaded data import file from Azure Blob: %s (%d bytes)", job.file_blob_path, len(file_bytes))
+
+        if not file_bytes:
+            raise ValueError(f"File content missing for import job #{job.id}")
+
         quarantine_buffer: List[Dict[str, Any]] = []
         row_generator = self._stream_rows(
-            file_bytes=job.file_content,
+            file_bytes=file_bytes,
             filename=job.filename,
             headers=list(confirmed_mapping.get("mappings", {}).keys()),
         )

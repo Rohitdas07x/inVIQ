@@ -51,16 +51,26 @@ const AlertsDropdown = () => {
                                             <X size={14} />
                                         </button>
                                         <div className="flex items-start gap-2 pr-6">
-                                            {alert.type === 'low_stock_alert' ? (
-                                                <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                                            {alert.type === 'fefo_expiry_alert' || alert.event_topic === 'expiry.critical' ? (
+                                                <span className="p-1 bg-red-50 text-red-600 rounded-md shrink-0 mt-0.5">
+                                                    <AlertTriangle size={15} />
+                                                </span>
+                                            ) : alert.type === 'cold_chain_warning' || alert.event_topic === 'coldchain.warning' ? (
+                                                <span className="p-1 bg-cyan-50 text-cyan-600 rounded-md shrink-0 mt-0.5">
+                                                    <Package size={15} />
+                                                </span>
                                             ) : (
-                                                <Package size={16} className="text-blue-500 mt-0.5 shrink-0" />
+                                                <span className="p-1 bg-amber-50 text-amber-600 rounded-md shrink-0 mt-0.5">
+                                                    <AlertTriangle size={15} />
+                                                </span>
                                             )}
                                             <div>
-                                                <p className="text-sm font-medium text-slate-800">{alert.message || 'Low stock alert'}</p>
+                                                <p className="text-sm font-medium text-slate-800">
+                                                    {alert.message || (alert.type === 'fefo_expiry_alert' ? 'Medicine expiring soon' : 'Stock alert')}
+                                                </p>
                                                 {alert.item_name && (
-                                                    <p className="text-xs text-slate-500 mt-1">
-                                                        Item: {alert.item_name}
+                                                    <p className="text-xs text-slate-500 mt-0.5">
+                                                        Item: {alert.item_name} {alert.batch_number ? `(Batch #${alert.batch_number})` : ''}
                                                     </p>
                                                 )}
                                                 {alert.location_name && (

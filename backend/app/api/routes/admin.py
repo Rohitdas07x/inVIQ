@@ -776,12 +776,35 @@ def generate_pdf_report(
 
     # Build PDF
     doc.build(elements)
+    pdf_bytes = buffer.getvalue()
     buffer.seek(0)
 
     filename = f"inviq_{report_type}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.pdf"
+    response_headers = {"Content-Disposition": f"attachment; filename={filename}"}
+
+    # Upload generated report to Azure Blob Storage for cloud archiving if available
+    try:
+        from app.infrastructure.storage.azure_blob_storage import get_storage_service
+        storage = get_storage_service()
+        if storage.is_available:
+            now_dt = datetime.now(timezone.utc)
+            blob_path = f"reports/{caller_org_id or 'global'}/{now_dt.year}/{now_dt.month:02d}/{filename}"
+            blob_url = storage.upload_file(
+                file_bytes=pdf_bytes,
+                blob_name=blob_path,
+                content_type="application/pdf",
+            )
+            if blob_url:
+                sas_url = storage.generate_sas_url(blob_path)
+                response_headers["X-Report-Blob-Path"] = blob_path
+                response_headers["X-Report-Blob-Url"] = sas_url or blob_url
+                logger.info("Archived admin report PDF in Azure Blob Storage: %s", blob_path)
+    except Exception as storage_err:
+        logger.warning("Failed to archive report in Azure Blob Storage: %s", storage_err)
+
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers=response_headers,
     )
 

@@ -123,13 +123,36 @@ def upload_and_map_file(
     if current_user.role != "super_admin" and current_user.org_id is None:
         raise AuthorizationError("User is not assigned to an organization")
 
-    # Save job record with raw file bytes for step 2
+    # Upload raw file to Azure Blob Storage if configured
+    import uuid
+    from app.infrastructure.storage.azure_blob_storage import get_storage_service
+
+    storage = get_storage_service()
+    file_blob_path = None
+    file_blob_url = None
+
+    if storage.is_available:
+        file_blob_path = f"imports/{current_user.org_id or 'global'}/{uuid.uuid4().hex[:12]}/{file.filename}"
+        content_type = "text/csv" if file.filename.lower().endswith(".csv") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        uploaded_url = storage.upload_file(
+            file_bytes=content,
+            blob_name=file_blob_path,
+            content_type=content_type,
+        )
+        if uploaded_url:
+            sas_url = storage.generate_sas_url(file_blob_path)
+            file_blob_url = sas_url or uploaded_url
+            logger.info("Uploaded data import file to Azure Blob: %s", file_blob_path)
+
+    # Save job record with raw file bytes + blob storage metadata for step 2
     job = service.import_repo.create_job(
         uploaded_by_user_id=current_user.id,
         org_id=current_user.org_id,
         filename=file.filename,
         target_entity=target_entity,
         file_content=content,
+        file_blob_path=file_blob_path,
+        file_blob_url=file_blob_url,
         total_rows=total_rows,
         mapping_result=mapping_result,
         mapping_cache_hit=mapping_result.get("cache_hit", False),
@@ -222,13 +245,35 @@ def confirm_and_execute_import(
         job.status = "PROCESSING"
         service.import_repo.update_job(job)
 
-        thread = threading.Thread(
-            target=_run_background_import,
-            args=(job.id, confirmed_mapping, body.default_location_id, current_user.username),
-            daemon=True,
-            name=f"data-import-job-{job.id}",
-        )
-        thread.start()
+        try:
+            from app.workers.tasks import import_csv_task, _celery_available
+            if _celery_available:
+                import_csv_task.delay(
+                    job_id=job.id,
+                    org_id=job.org_id,
+                    actor_id=current_user.id,
+                    confirmed_mapping=confirmed_mapping,
+                    default_location_id=body.default_location_id,
+                    username=current_user.username,
+                )
+                logger.info("Queued Celery background import task for job #%d (org_id=%s)", job.id, job.org_id)
+            else:
+                thread = threading.Thread(
+                    target=_run_background_import,
+                    args=(job.id, confirmed_mapping, body.default_location_id, current_user.username),
+                    daemon=True,
+                    name=f"data-import-job-{job.id}",
+                )
+                thread.start()
+        except Exception as queue_err:
+            logger.warning("Celery queue dispatch failed, using worker thread fallback: %s", queue_err)
+            thread = threading.Thread(
+                target=_run_background_import,
+                args=(job.id, confirmed_mapping, body.default_location_id, current_user.username),
+                daemon=True,
+                name=f"data-import-job-{job.id}",
+            )
+            thread.start()
 
         return ImportStatusResponse(
             success=True,
