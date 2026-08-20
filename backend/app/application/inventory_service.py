@@ -73,6 +73,16 @@ class InventoryService:
         expiry_date: Optional[date] = None,
     ) -> Dict[str, Any]:
         try:
+            # 1. Acquire transaction-level advisory lock on (location_id, item_id) to eliminate first-write races
+            self.repo.acquire_advisory_lock(location_id, item_id)
+
+            # 2. Reject backdated entries if later activity already exists for this item/location
+            if self.repo.has_later_transactions(location_id, item_id, transaction_date) is True:
+                raise ValidationError(
+                    f"Backdated inventory transactions are not permitted when subsequent history exists after {transaction_date}. "
+                    "Please record the stock movement under the current date with appropriate adjustment notes."
+                )
+
             previous = self.repo.get_previous_transaction(
                 location_id, item_id, transaction_date, lock=True
             )
@@ -80,8 +90,7 @@ class InventoryService:
             if previous:
                 opening_stock = previous.closing_stock
             else:
-                item = self.repo.get_item_by_id(item_id)
-                opening_stock = item.min_stock if item else 0
+                opening_stock = 0
 
             closing_stock = opening_stock + received - issued
 
@@ -202,7 +211,9 @@ class InventoryService:
     ) -> Dict[str, Any]:
         try:
             results = []
-            errors = []
+
+            if not items_data:
+                raise ValidationError("items_data cannot be empty")
 
             for item_data in items_data:
                 result = self.add_transaction(
@@ -213,21 +224,22 @@ class InventoryService:
                     issued=item_data.get("issued", 0),
                     notes=item_data.get("notes"),
                     entered_by=entered_by,
+                    flush_only=True,
                     batch_number=item_data.get("batch_number"),
                     expiry_date=item_data.get("expiry_date"),
                 )
 
-                if result["success"]:
-                    results.append(result["data"])
-                else:
-                    errors.append(
-                        {"item_id": item_data["item_id"], "error": result.get("error")}
-                    )
+                if not result.get("success"):
+                    raise ValidationError(result.get("error", "Transaction failed"))
+                results.append(result["data"])
+
+            # Atomically commit once all rows succeed
+            self.repo.commit()
 
             return {
-                "success": len(errors) == 0,
-                "message": f"Processed {len(results)} transactions, {len(errors)} errors",
-                "data": {"successful": results, "failed": errors},
+                "success": True,
+                "message": f"Successfully processed {len(results)} transactions atomically",
+                "data": {"successful": results, "failed": []},
             }
 
         except (ValidationError, DatabaseError):
@@ -355,8 +367,8 @@ class InventoryService:
 
             # If any remaining quantity (e.g. unbatched opening stock), issue the remainder
             if remaining_to_dispense > 0:
-                fb_batch = f"BT-SCAN-{int(time.time()) % 10000}"
-                fb_expiry = date.today()
+                fb_batch = "UNBATCHED"
+                fb_expiry = None
                 tx_res = self.add_transaction(
                     location_id=location_id,
                     item_id=item.id,
@@ -370,7 +382,7 @@ class InventoryService:
                 )
                 allocated_batches.append({
                     "batch_number": fb_batch,
-                    "expiry_date": str(fb_expiry),
+                    "expiry_date": None,
                     "quantity": remaining_to_dispense,
                     "transaction_id": tx_res["data"]["id"],
                 })

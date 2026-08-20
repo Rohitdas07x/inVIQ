@@ -29,9 +29,11 @@ class RequisitionService:
         self.inv_repo = inv_repo
 
     def _generate_requisition_number(self) -> str:
+        if hasattr(self.repo, "get_next_requisition_number"):
+            return self.repo.get_next_requisition_number()
         today = datetime.now().strftime("%Y%m%d")
         prefix = f"REQ-{today}-"
-        count = self.repo.count_by_prefix(prefix)
+        count = self.repo.count_by_prefix(prefix) if hasattr(self.repo, "count_by_prefix") else 0
         return f"{prefix}{count + 1:03d}"
 
     @staticmethod
@@ -79,7 +81,7 @@ class RequisitionService:
         notes: Optional[str] = None,
         org_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        from app.core.exceptions import AuthorizationError
+        from app.core.exceptions import AuthorizationError, DuplicateError
         try:
             location = self.repo.get_location(location_id)
             if not location:
@@ -105,40 +107,51 @@ class RequisitionService:
                         f"Item '{item.name}' does not belong to your organization"
                     )
 
-
                 if item_data.get("quantity", 0) <= 0:
                     raise ValidationError(
                         f"Quantity must be positive for item {item.name}"
                     )
 
-            req_number = self._generate_requisition_number()
-            requisition = self.repo.create(
-                requisition_number=req_number,
-                location_id=location_id,
-                requested_by=requested_by,
-                department=department,
-                urgency=urgency,
-                status="PENDING",
-                notes=notes,
-            )
+            # Collision-resilient creation loop under simultaneous concurrent requests
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                try:
+                    req_number = self._generate_requisition_number()
+                    requisition = self.repo.create(
+                        requisition_number=req_number,
+                        location_id=location_id,
+                        requested_by=requested_by,
+                        department=department,
+                        urgency=urgency,
+                        status="PENDING",
+                        notes=notes,
+                    )
 
-            for item_data in items:
-                self.repo.add_item(
-                    requisition_id=requisition.id,
-                    item_id=item_data["item_id"],
-                    quantity_requested=item_data["quantity"],
-                    notes=item_data.get("notes"),
-                )
+                    for item_data in items:
+                        self.repo.add_item(
+                            requisition_id=requisition.id,
+                            item_id=item_data["item_id"],
+                            quantity_requested=item_data["quantity"],
+                            notes=item_data.get("notes"),
+                        )
 
-            self.repo.commit()
-            self.repo.refresh(requisition)
+                    self.repo.commit()
+                    self.repo.refresh(requisition)
 
-            logger.info("Requisition %s created by %s", req_number, requested_by)
-            return {
-                "success": True,
-                "message": f"Requisition {req_number} created successfully",
-                "data": self._format_requisition(requisition),
-            }
+                    logger.info("Requisition %s created by %s", req_number, requested_by)
+                    return {
+                        "success": True,
+                        "message": f"Requisition {req_number} created successfully",
+                        "data": self._format_requisition(requisition),
+                    }
+                except DuplicateError:
+                    self.repo.rollback()
+                    if attempt == max_attempts - 1:
+                        raise DatabaseError("Failed to generate unique requisition number after multiple attempts")
+                    logger.warning(
+                        "Requisition number collision for %s (attempt %d/%d), retrying...",
+                        req_number, attempt + 1, max_attempts,
+                    )
 
         except (NotFoundError, ValidationError, AuthorizationError, DatabaseError):
             self.repo.rollback()

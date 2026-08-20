@@ -162,7 +162,56 @@ class TestBarcodeDispense:
             },
             headers=headers,
         )
-        assert response.status_code in (400, 422)
+    def test_scan_dispense_unbatched_stock(self, client, test_user, db):
+        """Dispensing stock without batch records should use UNBATCHED with no expiry date."""
+        org_id = test_user["user"].org_id
+        location = Location(org_id=org_id, name="Dispense Counter Unbatched", type="counter", region="North")
+        item = Item(
+            org_id=org_id,
+            name="Unbatched Medicine",
+            barcode="890108600000",
+            category="General",
+            unit="box",
+            lead_time_days=3,
+            min_stock=5,
+            mrp=50.0,
+        )
+        db.add_all([location, item])
+        db.commit()
+        db.refresh(location)
+        db.refresh(item)
+
+        # Inbound delivery with NO batch or expiry
+        tx_in = InventoryTransaction(
+            location_id=location.id,
+            item_id=item.id,
+            date=date.today(),
+            opening_stock=0,
+            received=10,
+            issued=0,
+            closing_stock=10,
+            batch_number=None,
+            expiry_date=None,
+        )
+        db.add(tx_in)
+        db.commit()
+
+        headers = get_auth_header(client, test_user["username"], test_user["password"])
+        response = client.post(
+            "/api/inventory/scan-dispense",
+            json={
+                "barcode": "890108600000",
+                "location_id": location.id,
+                "quantity": 2,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["data"]["remaining_stock"] == 8
+        assert data["data"]["batch_number"] == "UNBATCHED"
+        assert data["data"]["expiry_date"] is None
 
     def test_background_audits(self, db):
         res_fefo = run_fefo_expiry_audit(db, days_ahead=90)

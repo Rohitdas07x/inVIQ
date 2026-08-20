@@ -1,6 +1,6 @@
 import logging
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import func, desc
 from datetime import date
 from typing import Optional, List
@@ -11,7 +11,7 @@ from app.infrastructure.database.models import (
     Item,
     Location,
 )
-from app.core.exceptions import DatabaseError
+from app.core.exceptions import DatabaseError, DuplicateError
 
 logger = logging.getLogger("smart_inventory.repo.requisition")
 
@@ -77,12 +77,44 @@ class RequisitionRepository:
             .count()
         )
 
+    def get_next_requisition_number(self, target_date: Optional[date] = None) -> str:
+        """Generate sequential requisition number: REQ-YYYYMMDD-001, REQ-YYYYMMDD-002, etc.
+
+        Uses max existing sequence for the date to avoid duplicate counts.
+        """
+        if target_date is None:
+            target_date = date.today()
+
+        date_prefix = target_date.strftime("%Y%m%d")
+        prefix = f"REQ-{date_prefix}-"
+
+        latest = (
+            self.db.query(Requisition.requisition_number)
+            .filter(Requisition.requisition_number.like(f"{prefix}%"))
+            .order_by(Requisition.requisition_number.desc())
+            .first()
+        )
+
+        if latest and latest[0]:
+            try:
+                seq_part = str(latest[0]).split("-")[-1]
+                sequence = int(seq_part) + 1
+            except (ValueError, IndexError):
+                sequence = self.count_by_prefix(prefix) + 1
+        else:
+            sequence = 1
+
+        return f"{prefix}{sequence:03d}"
+
     def create(self, **kwargs) -> Requisition:
         try:
             requisition = Requisition(**kwargs)
             self.db.add(requisition)
             self.db.flush()
             return requisition
+        except IntegrityError:
+            self.db.rollback()
+            raise DuplicateError("A requisition with this number already exists")
         except SQLAlchemyError as e:
             self.db.rollback()
             logger.error("Database error creating requisition: %s", str(e))

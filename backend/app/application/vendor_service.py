@@ -23,6 +23,7 @@ from app.infrastructure.database.inventory_repo import InventoryRepository
 from app.infrastructure.database.invoice_repo import InvoiceRepository
 from app.application.invoice_pdf_service import InvoicePdfService
 from app.infrastructure.storage.azure_blob_storage import get_storage_service
+from app.core.exceptions import ValidationError
 
 logger = logging.getLogger("smart_inventory.vendor")
 
@@ -202,6 +203,19 @@ class VendorService:
 
             # Commit all successful transactions atomically
             self.db.commit()
+
+            # Resolve org_id strictly from location or vendor user if not provided
+            if org_id is None:
+                from app.infrastructure.database.models import Location, User
+                loc = self.db.query(Location).filter(Location.id == location_id).first()
+                if loc and loc.org_id:
+                    org_id = loc.org_id
+                else:
+                    v_user = self.db.query(User).filter(User.id == vendor_user_id).first()
+                    if v_user and v_user.org_id:
+                        org_id = v_user.org_id
+                    else:
+                        raise ValidationError("Organization ID (org_id) is required and could not be determined for this upload")
 
             # Save VendorUpload record
             upload = VendorUpload(
