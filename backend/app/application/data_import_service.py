@@ -326,9 +326,29 @@ class DataImportService:
         if not job:
             raise ValueError(f"Job #{job_id} not found")
 
-        if not job.file_content:
+        # Resolve file bytes from database column or Azure Blob Storage
+        file_bytes = job.file_content
+        if not file_bytes and job.file_blob_path:
+            try:
+                from app.infrastructure.storage.azure_blob_storage import get_storage_service
+                storage = get_storage_service()
+                file_bytes = storage.download_file(job.file_blob_path)
+                if file_bytes:
+                    logger.info(
+                        "Downloaded data import file from Azure Blob: %s (%d bytes)",
+                        job.file_blob_path,
+                        len(file_bytes),
+                    )
+            except Exception as blob_err:
+                logger.warning(
+                    "Failed to fetch import file from Azure Blob (%s): %s",
+                    job.file_blob_path,
+                    blob_err,
+                )
+
+        if not file_bytes:
             job.status = "FAILED"
-            job.error_message = "File content is missing from job record"
+            job.error_message = f"File content missing from both database and Blob Storage for job #{job.id}"
             return self.import_repo.update_job(job)
 
         job.status = "PROCESSING"
@@ -346,18 +366,6 @@ class DataImportService:
         success_count = 0
         quarantine_count = 0
         batch_size = settings.IMPORT_BATCH_SIZE
-
-        # Resolve file bytes from database column or Azure Blob Storage
-        file_bytes = job.file_content
-        if not file_bytes and job.file_blob_path:
-            from app.infrastructure.storage.azure_blob_storage import get_storage_service
-            storage = get_storage_service()
-            file_bytes = storage.download_file(job.file_blob_path)
-            if file_bytes:
-                logger.info("Downloaded data import file from Azure Blob: %s (%d bytes)", job.file_blob_path, len(file_bytes))
-
-        if not file_bytes:
-            raise ValueError(f"File content missing for import job #{job.id}")
 
         quarantine_buffer: List[Dict[str, Any]] = []
         row_generator = self._stream_rows(

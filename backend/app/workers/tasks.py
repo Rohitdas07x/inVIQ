@@ -86,8 +86,8 @@ def import_csv_task(
             logger.error("Unauthorized import job access in worker: job_id=%s, org_id=%s", job_id, org_id)
             return {"status": "error", "message": "Job not found or cross-tenant access"}
 
-        # Use confirmed mapping from argument or fallback to proposed mapping on job
-        mapping = confirmed_mapping or job.proposed_mapping or {}
+        # Use confirmed mapping from argument or fallback to mapping_result on job
+        mapping = confirmed_mapping or getattr(job, "mapping_result", None) or {}
 
         service = DataImportService(session)
         updated_job = service.execute_import(
@@ -150,6 +150,8 @@ def generate_invoice_pdf_task(
         from app.application.vendor_service import VendorService
         from app.application.invoice_pdf_service import InvoicePdfService
         from app.infrastructure.storage.azure_blob_storage import get_storage_service
+        from app.infrastructure.database.models import User, VendorUpload
+        from sqlalchemy.orm import joinedload
 
         svc = VendorService(session)
         invoice = svc.get_invoice(invoice_id, org_id=org_id)
@@ -168,16 +170,49 @@ def generate_invoice_pdf_task(
                 "total_amount": float(invoice.total_amount),
                 "status": invoice.status,
             }
+
+            # Query real vendor details
+            vendor_user = session.query(User).filter(User.id == invoice.vendor_user_id).first()
             vendor_data = {
-                "username": f"vendor-{invoice.vendor_user_id}",
-                "full_name": "Authorized Vendor",
-                "email": "vendor@inviq.local",
+                "username": vendor_user.username if vendor_user else f"vendor-{invoice.vendor_user_id}",
+                "full_name": (vendor_user.full_name or vendor_user.username) if vendor_user else "Authorized Vendor",
+                "email": vendor_user.email if vendor_user else "vendor@inviq.local",
             }
+
+            # Retrieve location via vendor_upload relationship.
+            # VendorInvoice has NO location_id column — the location belongs to
+            # invoice.vendor_upload.location (VendorUpload → Location FK).
+            from app.infrastructure.database.models import VendorInvoice as VendorInvoiceModel
+            invoice_with_upload = (
+                session.query(VendorInvoiceModel)
+                .options(
+                    joinedload(VendorInvoiceModel.vendor_upload).joinedload(VendorUpload.location)
+                )
+                .filter(VendorInvoiceModel.id == invoice_id)
+                .first()
+            )
+            location_obj = None
+            if (
+                invoice_with_upload
+                and invoice_with_upload.vendor_upload
+                and invoice_with_upload.vendor_upload.location
+            ):
+                candidate = invoice_with_upload.vendor_upload.location
+                # Enforce org-scoping: reject locations belonging to another tenant
+                if candidate.org_id == org_id:
+                    location_obj = candidate
+                else:
+                    logger.error(
+                        "Location org mismatch for invoice %s: location.org_id=%s vs org_id=%s — "
+                        "falling back to placeholder location data",
+                        invoice_id, candidate.org_id, org_id,
+                    )
+
             location_data = {
-                "name": "Central Pharmacy Depot",
-                "type": "WAREHOUSE",
-                "region": "West Bengal",
-                "address": "Healthcare Distribution Center",
+                "name": location_obj.name if location_obj else "Central Pharmacy Depot",
+                "type": location_obj.type if location_obj else "WAREHOUSE",
+                "region": location_obj.region if location_obj else "Default Region",
+                "address": location_obj.address or "Main Store Location" if location_obj else "Healthcare Distribution Center",
             }
 
             pdf_bytes = InvoicePdfService.generate_invoice_pdf(

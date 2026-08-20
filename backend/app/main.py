@@ -75,7 +75,12 @@ async def lifespan(app: FastAPI):
     """Manage startup and shutdown lifecycle."""
     # ── Startup ──
     configure_langsmith()          # apply LangSmith env-vars (no import-time side effects)
-    Base.metadata.create_all(bind=engine)
+
+    # In production, schemas are managed exclusively via Alembic migrations.
+    # create_all() is only run in development/testing for rapid local iteration.
+    if settings.ENVIRONMENT != "production":
+        Base.metadata.create_all(bind=engine)
+
     seed_admin_user()
     get_redis()  # Initialize Redis connection (logs status)
 

@@ -53,13 +53,20 @@ def run_fefo_expiry_audit(
         risk_val = float(mrp) * float(tx.closing_stock)
         total_risk_val += risk_val
 
-        # Robust multi-tenant org_id resolution: Item -> Location -> Passed org_id -> Default 1
+        # Multi-tenant org_id resolution: Item -> Location -> Passed org_id
         item_org_id = (
             getattr(tx.item, "org_id", None)
             or (getattr(tx.location, "org_id", None) if tx.location else None)
             or org_id
-            or 1
         )
+
+        if not item_org_id:
+            logger.warning(
+                "Skipping FEFO expiry alert for item '%s' (id=%s) — no organization associated",
+                getattr(tx.item, "name", "Unknown"),
+                getattr(tx.item, "id", "N/A"),
+            )
+            continue
 
         alert_data = {
             "type": "fefo_expiry_alert",
@@ -115,7 +122,15 @@ def run_stock_threshold_audit(
         if item_org_id is None:
             # Look up item's org_id from DB
             item_row = db.query(Item.org_id).filter(Item.id == alert.item_id).first()
-            item_org_id = item_row[0] if item_row and item_row[0] else 1
+            item_org_id = item_row[0] if item_row and item_row[0] else None
+
+        if not item_org_id:
+            logger.warning(
+                "Skipping stock threshold alert for item '%s' (id=%s) — no organization associated",
+                getattr(alert, "item_name", "Unknown"),
+                getattr(alert, "item_id", "N/A"),
+            )
+            continue
 
         days_text = f" ({round(float(alert.days_remaining), 1)} days left)" if alert.days_remaining is not None else ""
         queue_websocket_alert({
@@ -167,7 +182,15 @@ def run_cold_chain_health_check(
     alerts_emitted = 0
     # Audit active stock and temperature tracking for cold-chain items
     for item in cold_items:
-        item_org_id = item.org_id or org_id or 1
+        item_org_id = getattr(item, "org_id", None) or org_id
+        if not item_org_id:
+            logger.warning(
+                "Skipping cold-chain alert for item '%s' (id=%s) — no organization associated",
+                item.name,
+                item.id,
+            )
+            continue
+
         # Check if item has any batches nearing expiry (<30 days)
         cutoff = date.today() + timedelta(days=30)
         expiring_tx = (

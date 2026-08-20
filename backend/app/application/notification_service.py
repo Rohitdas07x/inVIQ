@@ -24,19 +24,19 @@ class NotificationService:
     def send_welcome_email(
         to_email: str,
         username: str,
-        password: str,
         role: str,
         full_name: Optional[str] = None,
+        activation_link: Optional[str] = None,
     ) -> bool:
         """
-        Send welcome email to newly created user with login credentials.
+        Send welcome email to newly created user with secure activation / login link.
 
         Args:
             to_email: User's email address
             username: User's username for login
-            password: User's plain text password (sent only once)
-            role: User's role (admin, manager, staff, vendor)
+            role: User's role (super_admin, admin, staff, vendor)
             full_name: User's full name (optional)
+            activation_link: Secure link to set password and activate account (optional)
 
         Returns:
             bool: True if email sent successfully, False otherwise
@@ -66,7 +66,8 @@ class NotificationService:
                 "vendor": "/vendor",
             }
             portal_url = role_portals.get(role, "/signin")
-
+            target_url = activation_link or f"{settings.FRONTEND_URL or 'http://localhost:5173'}{portal_url}"
+            button_label = "Set Password & Activate Account" if activation_link else "Login to Your Portal"
 
             # HTML email template
             html_content = f"""
@@ -87,7 +88,7 @@ class NotificationService:
                              padding: 5px 10px; border-radius: 4px; display: inline-block; }}
                     .button {{ display: inline-block; background: #667eea; color: white; 
                               padding: 12px 30px; text-decoration: none; border-radius: 6px; 
-                              margin: 20px 0; }}
+                              margin: 20px 0; font-weight: bold; }}
                     .warning {{ background: #fef3c7; border-left: 4px solid #f59e0b; 
                                padding: 15px; margin: 20px 0; border-radius: 4px; }}
                     .footer {{ text-align: center; color: #6b7280; font-size: 12px; margin-top: 30px; }}
@@ -106,14 +107,10 @@ class NotificationService:
                         as a <strong>{role.title()}</strong>.</p>
                         
                         <div class="credentials">
-                            <h3 style="margin-top: 0; color: #667eea;">🔐 Your Login Credentials</h3>
+                            <h3 style="margin-top: 0; color: #667eea;">🔐 Account Details</h3>
                             <div class="credential-row">
                                 <span class="label">Username:</span> 
                                 <span class="value">{username}</span>
-                            </div>
-                            <div class="credential-row">
-                                <span class="label">Password:</span> 
-                                <span class="value">{password}</span>
                             </div>
                             <div class="credential-row">
                                 <span class="label">Role:</span> 
@@ -122,14 +119,13 @@ class NotificationService:
                         </div>
                         
                         <div class="warning">
-                            <strong>⚠️ Security Notice:</strong> Please change your password after your first login. 
-                            Keep your credentials secure and do not share them with anyone.
+                            <strong>🔒 Security Notice:</strong> To ensure your account's security, please set your password using the secure activation link below. This single-use link expires in 24 hours.
                         </div>
                         
                         <div style="text-align: center;">
-                            <a href="{settings.FRONTEND_URL or 'http://localhost:5173'}{portal_url}" 
+                            <a href="{target_url}" 
                                class="button">
-                                Login to Your Portal
+                                {button_label}
                             </a>
                         </div>
                         
@@ -140,8 +136,8 @@ class NotificationService:
                         <strong>InvIQ Team</strong></p>
                     </div>
                     <div class="footer">
-                        <p>This is an automated message. Please do not reply to this email.</p>
-                        <p>&copy; 2026 InvIQ - Smart Inventory Management System</p>
+                        <p>This is an automated message, please do not reply directly to this email.</p>
+                        <p>&copy; {settings.PROJECT_NAME}. All rights reserved.</p>
                     </div>
                 </div>
             </body>

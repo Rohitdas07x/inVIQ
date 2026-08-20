@@ -233,6 +233,7 @@ def confirm_and_execute_import(
         resource_type="data_import_job",
         resource_id=str(job.id),
         user_id=current_user.id,
+        org_id=current_user.org_id,
         details={"filename": job.filename, "target_entity": job.target_entity, "total_rows": job.total_rows},
         ip_address=request.client.host if request.client else "unknown",
     )
