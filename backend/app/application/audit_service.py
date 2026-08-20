@@ -27,6 +27,7 @@ class AuditService:
         resource_type: str,
         resource_id: Optional[str] = None,
         user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
         details: Optional[Dict[str, Any]] = None,
         ip_address: Optional[str] = None,
     ) -> None:
@@ -41,6 +42,7 @@ class AuditService:
                 resource_type=resource_type,
                 resource_id=resource_id,
                 user_id=user_id,
+                org_id=org_id,
                 details=details,
                 ip_address=ip_address,
             )

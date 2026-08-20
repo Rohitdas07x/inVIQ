@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 
 
 from app.infrastructure.database.models import Location, Item, InventoryTransaction
-from app.core.exceptions import DatabaseError, DuplicateError
+from app.core.exceptions import DatabaseError, DuplicateError, ValidationError
 
 logger = logging.getLogger("smart_inventory.repo.inventory")
 
@@ -38,6 +38,8 @@ class InventoryRepository:
         return q.first()
 
     def create_location(self, **kwargs) -> Location:
+        if "org_id" not in kwargs or kwargs["org_id"] is None:
+            raise ValidationError("Organization ID (org_id) is required to create a location")
         try:
             location = Location(**kwargs)
             self.db.add(location)
@@ -112,6 +114,8 @@ class InventoryRepository:
 
 
     def create_item(self, **kwargs) -> Item:
+        if "org_id" not in kwargs or kwargs["org_id"] is None:
+            raise ValidationError("Organization ID (org_id) is required to create an item")
         try:
             item = Item(**kwargs)
             self.db.add(item)
@@ -158,6 +162,35 @@ class InventoryRepository:
             logger.error("Database error deleting item: %s", str(e))
             raise DatabaseError(f"Failed to delete item: {str(e)}")
 
+
+    def acquire_advisory_lock(self, location_id: int, item_id: int) -> None:
+        """Acquire a Postgres transaction-scoped advisory lock on (location_id, item_id).
+
+        Prevents race conditions on initial stock creation and concurrent inventory transactions.
+        Automatically released when the current database transaction commits or rolls back.
+        Safely no-ops when running against non-Postgres engines (e.g. SQLite test runners).
+        """
+        try:
+            bind = self.db.get_bind()
+            if bind and getattr(bind.dialect, "name", "") == "postgresql":
+                from sqlalchemy import text
+                lock_key = hash((location_id, item_id)) & 0x7FFFFFFF
+                self.db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
+        except Exception as e:
+            logger.debug("Advisory lock skipped or unsupported: %s", e)
+
+    def has_later_transactions(self, location_id: int, item_id: int, after_date: date) -> bool:
+        """Check if any transaction history exists strictly after after_date for this item/location."""
+        return (
+            self.db.query(InventoryTransaction)
+            .filter(
+                InventoryTransaction.location_id == location_id,
+                InventoryTransaction.item_id == item_id,
+                InventoryTransaction.date > after_date,
+            )
+            .first()
+            is not None
+        )
 
     def get_previous_transaction(
         self, location_id: int, item_id: int, before_date: date, lock: bool = False

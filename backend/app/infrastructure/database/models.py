@@ -92,7 +92,7 @@ class Location(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False, index=True)
     type = Column(String(50), nullable=False, index=True)  # retail_counter | cold_storage | branch | warehouse
     region = Column(String(100), nullable=False, index=True)
@@ -118,7 +118,7 @@ class Item(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False, index=True)
     category = Column(String(100), nullable=False, index=True)
     unit = Column(String(50), nullable=False)
@@ -264,7 +264,7 @@ class VendorUpload(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     filename = Column(String(255), nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
     total_rows = Column(Integer, nullable=False, default=0)
@@ -289,7 +289,7 @@ class VendorInvoice(Base):
     __tablename__ = "vendor_invoices"
 
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     vendor_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     vendor_upload_id = Column(Integer, ForeignKey("vendor_uploads.id"), nullable=False, index=True)
     invoice_number = Column(String(50), unique=True, nullable=False, index=True)
@@ -342,7 +342,7 @@ class DataImportJob(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     filename = Column(String(255), nullable=False)
     target_entity = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="PENDING", index=True)

@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, List, Dict, Any
 
 from app.infrastructure.database.models import DataImportJob, ImportQuarantineRow
-from app.core.exceptions import DatabaseError
+from app.core.exceptions import DatabaseError, ValidationError
 
 logger = logging.getLogger("smart_inventory.repo.data_import")
 
@@ -33,6 +33,8 @@ class DataImportRepository:
         mapping_cache_hit: bool = False,
         status: str = "PENDING",
     ) -> DataImportJob:
+        if org_id is None:
+            raise ValidationError("Organization ID (org_id) is required for data import jobs")
         try:
             job = DataImportJob(
                 uploaded_by_user_id=uploaded_by_user_id,

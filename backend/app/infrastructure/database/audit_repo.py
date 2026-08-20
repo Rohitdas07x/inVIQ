@@ -26,12 +26,14 @@ class AuditRepository:
         resource_type: str,
         resource_id: Optional[str] = None,
         user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
         details: Optional[Dict[str, Any]] = None,
         ip_address: Optional[str] = None,
     ) -> AuditLog:
         try:
             log = AuditLog(
                 user_id=user_id,
+                org_id=org_id,
                 username=username,
                 action=action,
                 resource_type=resource_type,
