@@ -105,19 +105,28 @@ With `Retry-After` header.
 
 ### 5. Caching System
 
-Analytics and dashboard statistics are cached in Redis. **REST and GraphQL share the same cache keys.**
+Analytics and dashboard statistics are cached in Upstash Redis and partitioned strictly per tenant. **REST and GraphQL share the same tenant-scoped cache keys.**
 
-| Cache Key | TTL | Shared By |
-|-----------|-----|-----------|
-| `cache:analytics:dashboard_stats` | 2 min | REST + GraphQL |
-| `cache:analytics:heatmap` | 5 min | REST + GraphQL |
-| `cache:analytics:alerts:CRITICAL` | 5 min | REST + GraphQL |
-| `cache:analytics:alerts:WARNING` | 5 min | REST + GraphQL |
-| `cache:analytics:summary` | 5 min | REST + GraphQL |
+| Cache Key Pattern | TTL | Shared By | Scope |
+|-------------------|-----|-----------|-------|
+| `cache:{org_id}:analytics:dashboard_stats` | 2 min | REST + GraphQL | Per Organization |
+| `cache:{org_id}:analytics:heatmap` | 5 min | REST + GraphQL | Per Organization |
+| `cache:{org_id}:analytics:alerts:CRITICAL` | 5 min | REST + GraphQL | Per Organization |
+| `cache:{org_id}:analytics:alerts:WARNING` | 5 min | REST + GraphQL | Per Organization |
+| `cache:{org_id}:analytics:summary` | 5 min | REST + GraphQL | Per Organization |
 
-- **Invalidation:** Automatically flushed on write transactions (`/api/inventory/transaction`, `/api/requisition/{id}/approve`).
-- **`stockHealth` GraphQL query:** Not cached — designed for ad-hoc reporting.
-- **Key prefix:** All cache keys prefixed with `cache:` to avoid collision with rate-limiter keys.
+- **Invalidation:** Automatically flushed across the tenant pattern (`cache:{org_id}:*`) on write transactions (`/api/inventory/transaction`, `/api/requisition/{id}/approve`, `/api/vendor/upload-delivery`).
+- **`stockHealth` GraphQL query:** Not cached — designed for real-time ad-hoc reporting.
+- **Key prefix:** All keys prefixed with `cache:{org_id}:` to prevent cross-tenant data leakage.
+
+### 6. Password Complexity Policy
+
+All password creation and update endpoints (`/auth/register`, `/auth/change-password`, `/auth/reset-password`, `/auth/users/{id}/reset-password`) strictly enforce:
+- Minimum **8 characters**
+- At least **1 uppercase letter** (`A-Z`)
+- At least **1 lowercase letter** (`a-z`)
+- At least **1 digit** (`0-9`)
+- At least **1 special character** (`!@#$%^&*()_+-=[]{}|;:,.<>?`)
 
 ---
 
@@ -127,24 +136,24 @@ Analytics and dashboard statistics are cached in Redis. **REST and GraphQL share
 
 | Endpoint | Method | Auth | Rate Limit | Description |
 |---|---|---|---|---|
-| `/auth/login` | **POST** | Public | 5/min | Authenticate credentials. Returns access+refresh JWT. Lockout after 5 failures. |
-| `/auth/register` | **POST** | `admin`+ | 3/min | Register a new user. Sends welcome email if SMTP enabled. |
+| `/auth/login` | **POST** | Public | 5/min | Authenticate credentials. Returns access+refresh JWT with HttpOnly SameSite cookie. Lockout after 5 failures. |
+| `/auth/register` | **POST** | `admin`+ | 3/min | Register a new user with password complexity check. Emits tenant audit log. |
 | `/auth/logout` | **POST** | Authenticated | Default | Blacklist active JWT in Redis. |
 | `/auth/refresh` | **POST** | Public | 10/min | Exchange valid refresh token for new access token. Old refresh revoked. |
 | `/auth/me` | **GET** | Authenticated | Default | Retrieve current user profile. |
 | `/auth/me` | **PATCH** | Authenticated | Default | Update own email/full_name. |
-| `/auth/change-password` | **POST** | Authenticated | Default | Verify current password, set new one. |
+| `/auth/change-password` | **POST** | Authenticated | Default | Verify current password, enforce complexity, set new one, emit `iat` token invalidation. |
 | `/auth/users` | **GET** | `admin`+ | Default | Paginated user list with role/status filters. |
 | `/auth/users/{user_id}` | **GET** | `admin`+ | Default | User detail. |
 | `/auth/users/{user_id}/role` | **PUT** | `admin`+ | Default | Update user role. |
 | `/auth/users/{user_id}/activate` | **PUT** | `admin`+ | Default | Activate user account. |
 | `/auth/users/{user_id}/deactivate` | **PUT** | `admin`+ | Default | Deactivate user (not self). |
-| `/auth/users/{user_id}/reset-password` | **POST** | `admin`+ | Default | Admin password reset. |
+| `/auth/users/{user_id}/reset-password` | **POST** | `admin`+ | Default | Admin password reset with complexity check. |
 | `/auth/users/{user_id}` | **DELETE** | `admin`+ | Default | Hard delete user (not self). |
 | `/auth/request-password-reset` | **POST** | Public | 3/min | Send reset email (no user enumeration). |
-| `/auth/reset-password` | **POST** | Public | 5/min | Reset password via email token. |
+| `/auth/reset-password` | **POST** | Public | 5/min | Reset password via email token (invalidates all prior tokens via `iat`). |
 | `/auth/verify-email` | **POST** | Public | Default | Verify email via token. |
-| `/auth/google-auth` | **POST** | Public | 10/min | Google OAuth login/register. |
+| `/auth/google-auth` | **POST** | Public | 10/min | Cryptographic Google OAuth ID-token verification (google-auth). |
 
 #### Request/Response Samples
 

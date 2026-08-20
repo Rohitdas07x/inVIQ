@@ -263,3 +263,57 @@ Each entry records *why* a choice was made — the code itself shows *what* was 
 - **Why**: In serverless and testing environments where Redis may be unreachable or offline, application caching previously failed or threw exceptions. The dual-layer design ensures that caching works seamlessly in offline mode, local dev, and testing while ensuring that writes invalidate both Redis and local in-memory keys consistently.
 - **Alternatives considered**: Fail without caching when Redis is down — increases DB load on cache misses. Redis `KEYS` command — blocks Redis single-threaded event loop on large keyspaces.
 - **Tradeoff accepted**: In-memory cache in multi-process environments is local to each process; Redis remains the primary shared cache in production.
+
+---
+
+## Exactly Two Environments (Development & Production) with Unified Dockerfile
+
+- **What**: Enforcing strictly two application environments (`development` and `production`), eliminating any separate "test" or "staging" application code branches.
+- **Why**: Maintaining "Same application code + same main Dockerfile; different environment configuration and infrastructure" eliminates the risk of "works in test but fails in prod". Development mode enables hot-reloading and developer conveniences; production mode enables multi-worker Gunicorn processes, Alembic database migrations, and strict security headers.
+- **Alternatives considered**: Separate Dockerfiles (`Dockerfile.dev`, `Dockerfile.prod`, `Dockerfile.test`) — causes build drift and untested deployment discrepancies.
+- **Tradeoff accepted**: Environment-specific behaviors (such as automatic schema creation or seeding) are explicitly driven by `settings.ENVIRONMENT` configuration checks.
+
+---
+
+## Production Database Schema Management via Alembic Exclusively
+
+- **What**: Excluded `Base.metadata.create_all(bind=engine)` from running when `settings.ENVIRONMENT == "production"`. In production, the Docker container entrypoint runs `alembic upgrade head` before booting Gunicorn.
+- **Why**: Running both `create_all()` and Alembic migrations at production startup creates schema drift, risks race conditions when multiple Gunicorn workers boot simultaneously, and bypasses versioned database change control.
+- **Alternatives considered**: Running `create_all()` everywhere — cannot apply `ALTER TABLE`, drop columns, or modify column constraints on existing databases.
+- **Tradeoff accepted**: In local development (`ENVIRONMENT=development`), `create_all()` is kept so developers can iterate quickly without running manual migration commands.
+
+---
+
+## Zero-Fallback Multi-Tenant Isolation and Non-Nullable `org_id`
+
+- **What**: Removed all fallback assignments to `org_id = 1` or `default=1` across `Location`, `Item`, `VendorUpload`, `VendorInvoice`, and `DataImportJob` models and repositories. Missing `org_id` on tenant entities immediately raises `ValidationError`.
+- **Why**: In a multi-tenant healthcare SaaS, falling back to Organization 1 when `org_id` is omitted poses severe data leakage risk (e.g. creating items, locations, or vendor uploads in another pharmacy's tenant account). Strict database-level `nullable=False` constraints and explicit application validation prevent cross-tenant contamination.
+- **Alternatives considered**: Permitting `org_id=None` for global master catalog items — causes ambiguity in inventory ownership and complicates tenant filtering.
+- **Tradeoff accepted**: Tests and callers must explicitly specify `org_id` when creating tenant entities.
+
+---
+
+## PostgreSQL Transaction Advisory Locking for Stock Mutations
+
+- **What**: Acquired session/transaction-scoped advisory locks on `(location_id, item_id)` in PostgreSQL during stock transactions via `pg_advisory_xact_lock(hashtext(...))`.
+- **Why**: Standard `SELECT ... FOR UPDATE` requires an existing database row to lock. On initial stock creation or concurrent first-writes, no row exists yet, creating a race condition where simultaneous requests compute contradictory opening stock balances. Postgres advisory locks serialize mutations on the logical pair `(location_id, item_id)` without requiring pre-existing table rows.
+- **Alternatives considered**: Table-level locking (`LOCK TABLE inventory_transactions`) — catastrophic bottleneck under concurrency. Redis-only locks — network round-trip overhead and risk of lock expiry during long database transactions.
+- **Tradeoff accepted**: Advisory locks are database-specific; on SQLite (used in fast unit tests), a no-op fallback is executed gracefully.
+
+---
+
+## Collision-Resilient Number Generation with Automatic Retry Loops
+
+- **What**: Replaced sequential row counting with descending max-sequence queries for invoice numbers (`INV-YYYYMMDD-XXX`) and requisition numbers (`REQ-YYYYMMDD-XXX`), wrapped in a 5-attempt retry loop that catches uniqueness collisions (`IntegrityError`/`DuplicateError`).
+- **Why**: Under simultaneous concurrent requests, row counting creates identical numbers, causing one request to fail with a database unique constraint conflict. Max-sequence extraction combined with automatic retry guarantees collision-proof sequence generation under high concurrency.
+- **Alternatives considered**: Random UUIDs — hard for pharmacy staff and accountants to read on physical receipts. Centralized Redis atomic counters — adds operational state and requires counter synchronization across dates.
+- **Tradeoff accepted**: Rare collisions under high concurrency trigger an internal subtransaction rollback and retry taking < 5ms.
+
+---
+
+## Cryptographic Google OAuth ID-Token Verification (`google-auth`)
+
+- **What**: Integrated `google-auth` library (`id_token.verify_oauth2_token`) with mandatory email verification, strict issuer validation (`accounts.google.com`), and audience matching against `settings.GOOGLE_CLIENT_ID`.
+- **Why**: Unverified or loosely checked JWT claims allow forged or replayed tokens from other Google OAuth applications to impersonate users. Cryptographic signature verification using Google's published JWKS public keys guarantees token authenticity.
+- **Alternatives considered**: Calling Google's `tokeninfo` HTTP endpoint on every login — adds an external network round-trip and fails if Google's API rate-limits requests.
+- **Tradeoff accepted**: Requires `google-auth` Python dependency and caching of Google's public signing keys.

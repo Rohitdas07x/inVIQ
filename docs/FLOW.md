@@ -240,14 +240,14 @@ api/routes/auth.py:reset_password
 
 **Path**:
 ```
-api/routes/inventory.py:add_single_transaction
-  → Depends(require_staff) → [Auth + Role guards]
-  → Depends(get_inventory_repo) → InventoryRepository
-  → Depends(get_inventory_service) → InventoryService(repo)
-  → InventoryRepository.get_location_by_id()        (DB SELECT validation)
-  → InventoryRepository.get_item_by_id()             (DB SELECT validation)
+api/routes/inventory.py:add_transaction
+  → [limiter: 30/minute]
+  → Depends(require_staff), Depends(get_inventory_repo), Depends(get_inventory_service)
   → application/inventory_service.py:InventoryService.add_transaction
-      → InventoryRepository.get_previous_transaction()   (DB SELECT last tx)
+      → InventoryRepository.acquire_advisory_lock(location_id, item_id)  (Postgres pg_advisory_xact_lock)
+      → InventoryRepository.has_later_transactions(location_id, item_id, tx_date) (Checks backdated entries)
+      → InventoryRepository.get_latest_transaction()     (DB SELECT last tx)
+      → InventoryRepository.get_previous_transaction()   (DB SELECT last tx before tx_date)
       → InventoryRepository.get_item_by_id()             (DB SELECT for min_stock)
       → InventoryRepository.create_transaction()         (DB INSERT inventory_transactions)
       → [if closing_stock <= item.min_stock]
@@ -256,11 +256,12 @@ api/routes/inventory.py:add_single_transaction
           → InventoryRepository.get_location_by_id()
           → threading.Thread → NotificationService.send_low_stock_alert   BACKGROUND THREAD
               → [if SMTP_ENABLED] smtplib.SMTP    EXTERNAL CALL: SMTP (non-blocking)
-  → application/cache_service.py:cache_invalidate_pattern("analytics:*")
+  → application/cache_service.py:cache_invalidate_pattern("cache:{org_id}:*")
       → infrastructure/cache/redis_client.py:get_redis → r.scan + r.delete
 ```
 
 **Branches**:
+- `has_later_transactions == True` → `ValidationError` ("Cannot insert backdated transactions") → HTTP 422
 - `closing_stock < 0` → `ValidationError` → HTTP 422, no DB write
 - Location or item not found → `NotFoundError` → HTTP 404
 - Stock alert: `closing_stock <= 0` → "CRITICAL"; `0 < closing_stock <= min_stock` → "WARNING"

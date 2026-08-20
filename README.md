@@ -17,12 +17,14 @@ Independent retail medical stores and local pharmacy chains in Tier-2/3 cities l
 
 ## 🛠️ Tech Stack
 
-### Backend
+### Backend & Cloud Infrastructure
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688?logo=fastapi&logoColor=white)
 ![GraphQL](https://img.shields.io/badge/GraphQL-Strawberry-E10098?logo=graphql&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Upstash-DC382D?logo=redis&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-App_Service_%26_Blob_Storage-0078D4?logo=microsoftazure&logoColor=white)
+![Alembic](https://img.shields.io/badge/Database-Alembic_Migrations-CC292B?logo=alembic&logoColor=white)
 
 ### Frontend
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -38,84 +40,63 @@ Independent retail medical stores and local pharmacy chains in Tier-2/3 cities l
 
 ## ✨ Key Capabilities
 
-- ⚡ **Ultra-Fast Barcode Scanner Dispensing** - Instant 1-by-1 stock deduction on counter scan with zero latency.
-- 📦 **FEFO Expiry Loss Shield** - Proactive batch alerts ensuring no expired medicine remains on shelves.
-- 🚚 **Supplier & Distributor Management** - Direct vendor accounts for delivery manifest ingestion.
+- ⚡ **Ultra-Fast Barcode Scanner Dispensing** - Instant 1-by-1 stock deduction on counter scan with zero latency and PostgreSQL transaction advisory locking.
+- 📦 **FEFO Expiry Loss Shield** - Proactive batch alerts at 30, 60, and 90 days ensuring no expired medicine remains on shelves.
+- 🚚 **Supplier & Distributor Management** - Direct vendor portal with 1-click Excel delivery manifest ingestion and automated PDF invoices stored in Azure Blob Storage.
 - 🤖 **AI Chemist Assistant** - Ask questions in plain English or Hindi: *"What medicines are running low in Counter 1?"*
 - 📊 **Real-Time Clean Analytics** - Live stock count, critical shortages, cold-chain fridge monitor, and store-by-store breakdowns.
-- 🔐 **Enterprise Multi-Tenant Security** - HttpOnly SameSite auth cookies, strict CSP headers, cross-tenant IDOR boundaries, single-use ticket WebSocket streams, and memory-bounded audio ingestion.
-
-
-
+- 🔐 **Enterprise Multi-Tenant Security** - Strict non-nullable `org_id` schema, HttpOnly SameSite auth cookies, CSP headers, issued-at (`iat`) token invalidation, cryptographic Google OAuth ID-token verification, and tenant-scoped Redis pub/sub.
+- ☁️ **Dual Environment Architecture** - Strictly separated `DEVELOPMENT` (local dev & rapid testing) and `PRODUCTION` (containerized Azure App Service / Cloud with Alembic migrations).
 
 ---
 
-## 🚀 Quick Local Setup
+## 🚀 Quick Setup & Environments
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL (or Neon account)
-- Redis (or Upstash account)
+InvIQ has exactly **TWO environments**:
+1. **DEVELOPMENT** — Local machine development and manual testing.
+2. **PRODUCTION** — Deployed cloud environment (Azure App Service + Azure Blob Storage + Neon Postgres + Upstash Redis).
 
-### Backend Setup
+### 1. Local Development Setup
 
 ```bash
-# Clone repository
+# 1. Clone repository
 git clone https://github.com/Sayandip05/InvIQ.git
 cd InvIQ
 
-# Create virtual environment
+# 2. Set up Python virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# 3. Configure local environment
 cp .env.example .env
-# Edit .env with your database, Redis, and API keys
+# Ensure ENVIRONMENT=development in your .env
 
-# Initialize database
+# 4. Run database migrations (or let dev server auto-create)
+./venv/bin/alembic -c backend/alembic.ini upgrade head
+
+# 5. Start Backend development server
 cd backend
-python -c "from app.infrastructure.database.connection import init_db; init_db()"
-
-# Run development server
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend Setup
+### 2. Frontend Development Setup
 
 ```bash
-# Navigate to frontend
+# In a new terminal
 cd frontend
-
-# Install dependencies
 npm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with backend API URL
-
-# Run development server
 npm run dev
+# Frontend runs at http://localhost:5173
 ```
 
-### Docker Setup (Recommended)
+### 3. Production Deployment (Azure App Service / Docker)
+
+The project uses a unified multi-stage `Dockerfile`. In production (`ENVIRONMENT=production`), the container automatically applies Alembic migrations on boot before starting Gunicorn workers:
 
 ```bash
-# Copy environment file
-cp .env.example .env
-# Edit .env with your credentials
-
-# Start all services
-docker-compose up -d
-
-# Access application
-# Frontend:      http://localhost:5173
-# Backend:       http://localhost:8000
-# API Docs:      http://localhost:8000/docs
-# GraphQL:       http://localhost:8000/graphql/analytics
+# Run via Docker Compose (or deploy Docker image to Azure App Service)
+docker compose up -d --build
 ```
 
 ---
@@ -396,17 +377,30 @@ For detailed documentation, see the `/docs` folder:
 ## 🧪 Testing
 
 ```bash
-# Run all tests (347 unit, integration, and security tests — 100% pass rate)
-cd backend
-pytest -v
+## 🧪 Testing & Quality Assurance
+
+```bash
+# Run all automated tests (321 test cases — 100% pass rate)
+./venv/bin/pytest backend/tests/ -v
 
 # Run with coverage report
-pytest --cov=app --cov-report=html
-
-# Run specific test file
-pytest tests/test_inventory_service.py -v
+./venv/bin/pytest backend/tests/ --cov=app --cov-report=term-missing
 ```
 
+---
+
+## ⚡ Performance Benchmarks
+
+The benchmark suite is located in `backend/benchmark/`:
+
+```bash
+# 1. Run concurrency and throughput latency benchmark
+cd backend
+../venv/bin/python benchmark/run_latency_benchmark.py
+
+# 2. Run Locust load testing suite
+../venv/bin/locust -f benchmark/locustfile.py --headless -u 100 -r 10 --run-time 1m --host http://localhost:8000
+```
 
 ---
 
@@ -415,27 +409,30 @@ pytest tests/test_inventory_service.py -v
 ```
 InvIQ/
 ├── backend/
+│   ├── alembic/                  # Version-controlled database migrations
+│   ├── alembic.ini               # Portable migration configuration
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── routes/           # REST routes (analytics, auth, inventory…)
-│   │   │   └── graphql/          # Strawberry GraphQL (types, context, resolvers, schema)
-│   │   ├── application/          # Business logic services
-│   │   ├── core/                 # Config, security, middleware
-│   │   ├── domain/               # Business domain logic
-│   │   └── infrastructure/       # Database, cache, vector store
-│   └── tests/                    # Test suite
+│   │   │   ├── routes/           # REST routes (auth, inventory, vendor, requisition, admin…)
+│   │   │   ├── schemas/          # Pydantic validation schemas with password complexity
+│   │   │   └── graphql/          # Strawberry GraphQL (resolvers, schema, role masking)
+│   │   ├── application/          # Domain services (inventory, vendor, data import, analytics…)
+│   │   ├── core/                 # Config, security (Argon2id, JWT, Google OAuth), middleware
+│   │   ├── infrastructure/       # Database models/repos, Upstash Redis, Azure Blob Storage, Qdrant
+│   │   └── workers/              # Celery background task processing & Celery Beat
+│   ├── benchmark/                # Concurrency benchmarks and Locust load tests
+│   └── tests/                    # 321 automated unit, integration, and security tests
 ├── frontend/
 │   ├── src/
-│   │   ├── components/           # React components
-│   │   ├── pages/                # Portal pages
-│   │   ├── context/              # Auth & WebSocket context
-│   │   └── utils/                # Helper functions
+│   │   ├── components/           # Reusable React components & Tailwind styles
+│   │   ├── pages/                # Admin, counter staff, and vendor portal views
+│   │   ├── context/              # Auth, multi-tenant organization & WebSocket alert context
+│   │   └── services/             # Axios API client with automatic token refresh
 │   └── package.json
-├── database/
-│   ├── schema.sql                # Database schema
-│   └── seed_data.py              # Sample data
-├── docs/                         # Documentation
-├── docker-compose.yml
+├── database/                     # Legacy schema reference & sample seed fixtures
+├── docs/                         # HLD, DECISIONS, FLOW, and API reference
+├── Dockerfile                    # Unified multi-stage production Dockerfile
+├── docker-compose.yml            # Local dev orchestration
 └── README.md
 ```
 
@@ -443,14 +440,16 @@ InvIQ/
 
 ## 🔐 Security Features
 
-- **JWT Authentication** - Access (30min) + Refresh (7 days) tokens
-- **Argon2 Password Hashing** - GPU-resistant algorithm
-- **Rate Limiting** - 5-60 req/min based on endpoint sensitivity
-- **Token Blacklist** - Logout invalidation with Redis
-- **Login Lockout** - 5 attempts → 15 min lockout
-- **Role-Based Access Control** - 5-tier role hierarchy with GraphQL field masking
-- **Audit Logging** - All write operations tracked
-- **Multi-Tenancy** - Organization-level data isolation
+- **Multi-Tenant Data Isolation** - Strict non-nullable `org_id` on all tenant entities; zero silent fallbacks.
+- **JWT Authentication** - Short-lived access tokens (30min) + refresh tokens (7 days) with `iat` revocation on password reset.
+- **Argon2id Password Hashing** - GPU/ASIC cracking resistant algorithm with unified complexity validation.
+- **Google OAuth ID Token Verification** - Cryptographic verification via `google-auth` with mandatory email verification and audience matching.
+- **Postgres Advisory Locking** - Transaction-level concurrency lock on `(location_id, item_id)` for zero race conditions.
+- **Rate Limiting** - SlowAPI sliding-window limiter backed by Upstash Redis TLS.
+- **Token Blacklist** - Immediate logout token revocation in Redis.
+- **Login Lockout** - 5 failed attempts → 15-minute brute-force lockout.
+- **Role-Based Access Control** - 4-tier role hierarchy (`super_admin`, `admin`, `staff`, `vendor`) with GraphQL field masking.
+- **Audit Logging** - Tenant-scoped immutable audit trail tracking all state-altering events.
 
 ---
 

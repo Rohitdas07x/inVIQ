@@ -208,11 +208,12 @@ graph TD
 | **GraphQL Layer (Strawberry)** | Read-only analytics API at `/graphql/analytics` — 5 queries, role-aware field masking, shared Redis cache with REST |
 | **AI Agent Service** | LangGraph ReAct agent with 9 tools, natural language processing, voice transcription (Sarvam AI) |
 | **Analytics Service** | Dashboard stats, heatmaps, critical alerts with Redis caching & local in-memory fallback |
-| **Inventory Service** | High-speed barcode dispense, stock tracking, transaction management, reorder calculations, WebSocket alert triggers |
-| **Requisition Service** | Approval workflow, status management, inventory updates |
-| **Vendor Service** | Excel delivery manifest parsing, item matching, bulk transaction creation, auto-invoicing |
+| **Inventory Service** | High-speed barcode dispense, stock tracking with Postgres advisory locks, transaction management, reorder calculations, WebSocket alert triggers |
+| **Requisition Service** | Approval workflow, collision-resilient sequential requisition numbers (`REQ-YYYYMMDD-XXX`), inventory updates |
+| **Vendor Service** | Excel delivery manifest parsing, item matching, bulk transaction creation, automated PDF invoice generation |
+| **Azure Blob Storage** | Cloud binary storage for delivery invoices (ReportLab PDF), data import manifests, and reports with DB fallback |
 | **Celery Worker & Beat** | Scheduled background audits: FEFO expiry (every 6h), stock shortage (hourly), cold-chain monitor (every 30m) |
-| **PostgreSQL** | Primary multi-tenant relational store (13 tables, DB Enums, composite indexes, Alembic migrations) |
+| **PostgreSQL** | Primary multi-tenant relational store (13 tables, strict non-nullable `org_id` foreign keys, composite indexes, Alembic migrations) |
 | **Upstash Redis** | Distributed cache, Pub/Sub alert broker, token blacklist, login attempt tracking |
 | **Qdrant Cloud** | Vector database for AI semantic memory and RAG context |
 
