@@ -107,13 +107,19 @@ def create_access_token(
       username  → for display without extra DB lookup
       role      → for RBAC checks without extra DB lookup
       type      → "access" sentinel to prevent refresh tokens being used as access
+      iat       → issued-at timestamp for password-reset session invalidation
       exp       → expiry timestamp
     """
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    now_utc = datetime.now(timezone.utc)
+    expire = now_utc + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    to_encode.update({"exp": expire, "type": "access"})
+    to_encode.update({
+        "exp": expire,
+        "iat": int(now_utc.timestamp()),
+        "type": "access",
+    })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -127,10 +133,15 @@ def create_refresh_token(
     prevents refresh tokens from being used to access protected endpoints.
     """
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    now_utc = datetime.now(timezone.utc)
+    expire = now_utc + (
         expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({
+        "exp": expire,
+        "iat": int(now_utc.timestamp()),
+        "type": "refresh",
+    })
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 

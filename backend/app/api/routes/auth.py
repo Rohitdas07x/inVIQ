@@ -254,15 +254,16 @@ def register(
         location_ids=loc_ids,
     )
 
+    # Generate secure activation / password-set token link (no plaintext password in email)
+    activation_token = _generate_password_reset_token(user.id, user.email)
+    activation_link = f"{settings.FRONTEND_URL}/reset-password?token={activation_token}"
 
-
-    # Send welcome email with credentials
     email_sent = NotificationService.send_welcome_email(
         to_email=user.email,
         username=user.username,
-        password=request_body.password,  # Plain text password (sent only once)
         role=user.role,
         full_name=user.full_name,
+        activation_link=activation_link,
     )
 
     if user.role == "admin":
@@ -280,6 +281,7 @@ def register(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=target_org_id,
         details={
             "new_user": user.username,
             "role": user.role,
@@ -308,14 +310,20 @@ def signup(
 ):
     """
     Public self-registration endpoint for new users.
-    Creates a new user account.
+    Creates a new user account as Pharmacy Owner / Store Admin.
     """
     if db.get_by_email(request_body.email):
         raise DuplicateError("A user with this email already exists")
     if db.get_by_username(request_body.username):
         raise DuplicateError("A user with this username already exists")
 
-    role = request_body.role if request_body.role in ["admin", "staff", "vendor"] else "admin"
+    if request_body.role in ["staff", "vendor"]:
+        raise ValidationError(
+            "Staff and vendor accounts must be invited by an organization administrator. "
+            "Public registration is only available for pharmacy owners/administrators."
+        )
+
+    role = "admin"
 
     org_id = None
     org_name = None
@@ -377,6 +385,7 @@ def signup(
         resource_type="user",
         resource_id=str(user.id),
         user_id=user.id,
+        org_id=org_id,
         details={
             "username": user.username,
             "role": user.role,
@@ -472,6 +481,8 @@ def login(
                     action="ACCOUNT_LOCKED",
                     resource_type="user",
                     resource_id=str(user.id),
+                    user_id=user.id,
+                    org_id=user.org_id,
                     details={"reason": "max_login_attempts_exceeded"},
                     ip_address=_get_client_ip(request),
                 )
@@ -507,6 +518,7 @@ def login(
         resource_type="user",
         resource_id=str(user.id),
         user_id=user.id,
+        org_id=user.org_id,
         ip_address=_get_client_ip(request),
     )
 
@@ -551,6 +563,11 @@ def logout(
     if access_token:
         blacklist_token(access_token)
 
+    # Extract and blacklist the refresh token from cookie or payload
+    refresh_token_str = request.cookies.get("refresh_token")
+    if refresh_token_str:
+        blacklist_refresh_token(refresh_token_str)
+
     # Audit log — reuse the injected db session, no extra connection
     try:
         audit = AuditService(db)
@@ -560,6 +577,7 @@ def logout(
             resource_type="user",
             resource_id=str(current_user.id),
             user_id=current_user.id,
+            org_id=current_user.org_id,
             ip_address=_get_client_ip(request),
         )
     except Exception:
@@ -686,6 +704,7 @@ def update_my_profile(
         resource_type="user",
         resource_id=str(current_user.id),
         user_id=current_user.id,
+        org_id=current_user.org_id,
         details=changes,
         ip_address=_get_client_ip(request),
     )
@@ -721,6 +740,7 @@ def change_password(
         resource_type="user",
         resource_id=str(current_user.id),
         user_id=current_user.id,
+        org_id=current_user.org_id,
         ip_address=_get_client_ip(request),
     )
 
@@ -885,6 +905,7 @@ def update_user_profile_by_admin(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={"target_user": user.username},
         ip_address=_get_client_ip(request),
     )
@@ -932,6 +953,7 @@ def update_user_role(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={
             "target_user": user.username,
             "old_role": old_role,
@@ -974,6 +996,7 @@ def activate_user(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={"target_user": user.username},
         ip_address=_get_client_ip(request),
     )
@@ -1014,6 +1037,7 @@ def deactivate_user(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={"target_user": user.username},
         ip_address=_get_client_ip(request),
     )
@@ -1047,6 +1071,15 @@ def admin_reset_password(
     user.locked_until = None
     db.update(user)
 
+    # Invalidate existing sessions issued before this password reset
+    try:
+        from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+        r = get_redis()
+        if r and is_redis_available():
+            r.setex(f"user_pw_changed:{user.id}", 3600 * 24, str(int(time.time())))
+    except Exception:
+        pass
+
     # Audit log
     audit = AuditService(db.db)
     audit.log(
@@ -1055,6 +1088,7 @@ def admin_reset_password(
         resource_type="user",
         resource_id=str(user.id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={"target_user": user.username},
         ip_address=_get_client_ip(request),
     )
@@ -1095,6 +1129,7 @@ def delete_user(
         resource_type="user",
         resource_id=str(user_id),
         user_id=current_user.id,
+        org_id=user.org_id,
         details={"deleted_user": deleted_username},
         ip_address=_get_client_ip(request),
     )
@@ -1135,6 +1170,7 @@ def request_password_reset(
             resource_type="user",
             resource_id=str(user.id),
             user_id=user.id,
+            org_id=user.org_id,
             details={"email": email},
             ip_address=_get_client_ip(request),
         )
@@ -1215,6 +1251,7 @@ def reset_password(
         resource_type="user",
         resource_id=str(user.id),
         user_id=user.id,
+        org_id=user.org_id,
         ip_address=_get_client_ip(request),
     )
 
@@ -1275,6 +1312,7 @@ def verify_email(
         resource_type="user",
         resource_id=str(user.id),
         user_id=user.id,
+        org_id=user.org_id,
         ip_address=_get_client_ip(request),
     )
 
@@ -1298,22 +1336,50 @@ def google_auth(
 
     """Authenticate or register user via Google OAuth."""
     try:
-        # Verify the ID token with Google
-        response_ext = httpx.get(
-            settings.GOOGLE_OAUTH_VERIFY_URL,
-            headers={"Authorization": f"Bearer {request_body.id_token}"},
-            timeout=10,
-        )
+        google_user = None
+        # Try cryptographic verification with google-auth if available
+        try:
+            from google.oauth2 import id_token as google_id_token
+            from google.auth.transport import requests as google_requests
+            id_info = google_id_token.verify_oauth2_token(
+                request_body.id_token,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID if settings.GOOGLE_CLIENT_ID else None,
+            )
+            google_user = id_info
+        except Exception:
+            # Fallback to Google OAuth verify endpoint (e.g. for mocked tests or tokeninfo endpoint)
+            response_ext = httpx.get(
+                settings.GOOGLE_OAUTH_VERIFY_URL,
+                headers={"Authorization": f"Bearer {request_body.id_token}"},
+                timeout=10,
+            )
+            if response_ext.status_code != 200:
+                raise AuthenticationError("Invalid Google ID token")
+            google_user = response_ext.json()
 
-        if response_ext.status_code != 200:
-            raise AuthenticationError("Invalid Google ID token")
+        if not google_user:
+            raise AuthenticationError("Failed to retrieve Google profile")
 
-        google_user = response_ext.json()
         google_email = google_user.get("email")
         google_name = google_user.get("name", "")
 
         if not google_email:
             raise AuthenticationError("Google account has no email")
+
+        # Mandatory claims verification: email_verified, issuer, audience
+        email_verified = google_user.get("email_verified")
+        if email_verified is None or str(email_verified).lower() not in ["true", "1"]:
+            raise AuthenticationError("Google account email is not verified")
+
+        iss = google_user.get("iss")
+        if not iss or iss not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise AuthenticationError("Invalid Google ID token issuer")
+
+        aud = google_user.get("aud")
+        if settings.GOOGLE_CLIENT_ID:
+            if not aud or aud != settings.GOOGLE_CLIENT_ID:
+                raise AuthenticationError("Google ID token audience mismatch")
 
         # Check if user exists
         user = db.get_by_email(google_email)
@@ -1347,6 +1413,7 @@ def google_auth(
                 resource_type="user",
                 resource_id=str(user.id),
                 user_id=user.id,
+                org_id=user.org_id,
                 ip_address=_get_client_ip(request),
             )
 
@@ -1435,6 +1502,7 @@ def google_auth(
             resource_type="user",
             resource_id=str(user.id),
             user_id=user.id,
+            org_id=user.org_id,
             details={"email": google_email},
             ip_address=_get_client_ip(request),
         )

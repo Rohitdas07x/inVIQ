@@ -114,6 +114,21 @@ def get_current_user(
                 detail="Token has been revoked",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        # ── Check password reset marker for cached user ──
+        try:
+            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+            r = get_redis()
+            if r and is_redis_available():
+                pw_changed_ts = r.get(f"user_pw_changed:{cached_user_id}")
+                if pw_changed_ts:
+                    with _user_auth_cache_lock:
+                        _user_auth_cache.pop(token, None)
+                    cached_user_id = None
+        except Exception:
+            pass
+
+    if cached_user_id is not None:
         user_repo = UserRepository(db)
         user = user_repo.get_by_id(cached_user_id)
         if user and user.is_active:

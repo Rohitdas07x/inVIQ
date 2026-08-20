@@ -27,6 +27,7 @@ alembic>=1.12.0
 pyjwt>=2.8.0
 pwdlib[argon2]>=0.2.0
 email-validator>=2.1.0
+google-auth>=2.27.0             # Cryptographic Google ID-token verification (OAuth2)
 
 # -- Caching, Queues & Rate Limiting ----------------------------------------
 redis>=5.0.1
