@@ -216,4 +216,38 @@ class TestWebSocketTicketAuth:
                 ws.receive_json()
 
 
+class TestTenantScopedAuditAlertRouting:
+    """Audit background tasks must never fallback to org 1 when org is missing, and DB enforces NOT NULL org_id."""
+
+    def test_audit_skips_unassociated_org_items(self, db):
+        from app.infrastructure.database.models import Item, Location
+        from app.application.background_tasks import run_fefo_expiry_audit, run_cold_chain_health_check
+        from unittest.mock import patch, Mock
+        from datetime import date
+        from sqlalchemy import text
+        from sqlalchemy.exc import IntegrityError
+
+        # 1. Verify database schema enforces NOT NULL constraint on org_id via direct SQL
+        with pytest.raises(IntegrityError):
+            db.execute(text("INSERT INTO items (name, category, unit, org_id) VALUES ('Orphan', 'Med', 'Box', NULL)"))
+            db.flush()
+        db.rollback()
+
+        # 2. Verify background audit tasks safely skip any mock unassociated entity without routing to org 1
+        mock_orphan_item = Mock(id=999, name="Orphan Vaccine", category="Vaccine", min_stock=10, storage_temp="cold_chain", org_id=None)
+        mock_orphan_tx = Mock(item_id=999, location_id=1, batch_number="ORPHAN-01", expiry_date=date.today(), closing_stock=5)
+
+        with patch("app.application.background_tasks.queue_websocket_alert") as mock_queue, \
+             patch.object(db, "query") as mock_query:
+
+            mock_query.return_value.filter.return_value.all.return_value = [mock_orphan_tx]
+            run_fefo_expiry_audit(db, days_ahead=30, org_id=None)
+
+            for call_args in mock_queue.call_args_list:
+                _, kwargs = call_args
+                payload = call_args[0][0] if call_args[0] else kwargs.get("alert")
+                if payload and payload.get("item_name") == "Orphan Vaccine":
+                    pytest.fail("Alert was erroneously dispatched for unassociated org item!")
+
+
 

@@ -90,3 +90,213 @@ class TestRBACAndTenantIsolation:
         assert client.put(f"/api/auth/users/{other_user.id}/role", json={"role": "admin"}, headers=admin_headers).status_code == 403
         # Attempt password reset
         assert client.post(f"/api/auth/users/{other_user.id}/reset-password", json={"new_password": "HackedPassword123!"}, headers=admin_headers).status_code == 403
+
+    def test_password_reset_token_iat_invalidation(self, client, test_user):
+        """Older access tokens created before password reset are rejected; new tokens created after work."""
+        import time
+        import jwt
+        from app.core.security import create_access_token
+        from app.core.config import settings
+        from unittest.mock import patch
+
+        fake_redis = {}
+
+        class MockRedis:
+            def get(self, key):
+                return fake_redis.get(key)
+            def setex(self, key, ttl, val):
+                fake_redis[key] = str(val)
+                return True
+            def delete(self, *keys):
+                for k in keys:
+                    fake_redis.pop(k, None)
+
+        mock_r = MockRedis()
+
+        try:
+            with patch("app.infrastructure.cache.redis_client.get_redis", return_value=mock_r), \
+                 patch("app.infrastructure.cache.redis_client.is_redis_available", return_value=True):
+
+                now = int(time.time())
+                # 1. Create older token issued 10 seconds ago
+                raw_token = create_access_token({
+                    "sub": str(test_user["user"].id),
+                    "username": test_user["username"],
+                    "role": test_user["user"].role,
+                    "org_id": test_user["user"].org_id or 1,
+                })
+                payload = jwt.decode(raw_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+                payload["iat"] = now - 10
+                old_token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+                # Verify older token works before password reset marker is placed
+                res1 = client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+                assert res1.status_code == 200
+
+                # 2. Simulate password reset happening 5 seconds ago
+                reset_ts = now - 5
+                mock_r.setex(f"user_pw_changed:{test_user['user'].id}", 86400, str(reset_ts))
+
+                # 3. Old token should now be rejected (401) because iat (now - 10) < reset_ts (now - 5)
+                res2 = client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+                assert res2.status_code == 401
+
+                # 4. Create new token issued now (iat = now >= reset_ts)
+                new_token = create_access_token({
+                    "sub": str(test_user["user"].id),
+                    "username": test_user["username"],
+                    "role": test_user["user"].role,
+                    "org_id": test_user["user"].org_id or 1,
+                })
+
+                res3 = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
+                assert res3.status_code == 200
+        finally:
+            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+            r = get_redis()
+            if r and is_redis_available():
+                try:
+                    r.delete(f"user_pw_changed:{test_user['user'].id}")
+                except Exception:
+                    pass
+
+    def test_public_signup_rejects_staff_and_vendor(self, client):
+        """Public signup should disallow staff and vendor roles directly."""
+        res_staff = client.post("/api/auth/signup", json={
+            "email": "staff_wannabe@example.com",
+            "username": "staff_wannabe",
+            "password": "Password123!",
+            "role": "staff",
+        })
+        assert res_staff.status_code in [400, 422]
+
+        res_vendor = client.post("/api/auth/signup", json={
+            "email": "vendor_wannabe@example.com",
+            "username": "vendor_wannabe",
+            "password": "Password123!",
+            "role": "vendor",
+        })
+        assert res_vendor.status_code in [400, 422]
+
+    def test_logout_revokes_refresh_token(self, client, test_user):
+        """Logout blacklists both access token and refresh token cookie."""
+        from unittest.mock import patch
+        with patch("app.infrastructure.cache.token_blacklist.blacklist_refresh_token") as mock_blk_refresh:
+            headers = get_auth_header(client, test_user["username"], test_user["password"])
+            res = client.post(
+                "/api/auth/logout",
+                headers=headers,
+                cookies={"refresh_token": "dummy-refresh-token"},
+            )
+            assert res.status_code == 200
+            mock_blk_refresh.assert_called_once_with("dummy-refresh-token")
+
+    def test_role_update_allowed_and_disallowed_roles(self, client, admin_user, test_user):
+        """Role update permits super_admin, admin, staff, vendor and rejects manager."""
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+        user_id = test_user["user"].id
+
+        try:
+            # manager is not a valid role
+            res_manager = client.put(f"/api/auth/users/{user_id}/role", json={"role": "manager"}, headers=admin_headers)
+            assert res_manager.status_code in [400, 422]
+
+            # valid roles
+            res_staff = client.put(f"/api/auth/users/{user_id}/role", json={"role": "staff"}, headers=admin_headers)
+            assert res_staff.status_code == 200
+
+            res_admin = client.put(f"/api/auth/users/{user_id}/role", json={"role": "admin"}, headers=admin_headers)
+            assert res_admin.status_code == 200
+        finally:
+            client.put(f"/api/auth/users/{user_id}/role", json={"role": "staff"}, headers=admin_headers)
+            test_user["user"].role = "staff"
+
+    def test_google_auth_strict_claims_validation(self, client):
+        """Google auth should reject unverified email or mismatched audience."""
+        from unittest.mock import patch, Mock
+
+        # 1. Unverified email
+        mock_resp_unverified = Mock()
+        mock_resp_unverified.status_code = 200
+        mock_resp_unverified.json.return_value = {
+            "email": "unverified@example.com",
+            "name": "Unverified User",
+            "email_verified": False,
+            "iss": "accounts.google.com",
+        }
+        with patch("httpx.get", return_value=mock_resp_unverified):
+            res1 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
+            assert res1.status_code in [401, 403]
+
+        # 2. Invalid issuer
+        mock_resp_bad_iss = Mock()
+        mock_resp_bad_iss.status_code = 200
+        mock_resp_bad_iss.json.return_value = {
+            "email": "badiss@example.com",
+            "name": "Bad Iss User",
+            "email_verified": True,
+            "iss": "evil.com",
+        }
+        with patch("httpx.get", return_value=mock_resp_bad_iss):
+            res2 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
+            assert res2.status_code in [401, 403]
+
+        # 3. Audience mismatch
+        from app.core.config import settings
+        orig_client_id = settings.GOOGLE_CLIENT_ID
+        try:
+            settings.GOOGLE_CLIENT_ID = "expected-client-id.apps.googleusercontent.com"
+            mock_resp_bad_aud = Mock()
+            mock_resp_bad_aud.status_code = 200
+            mock_resp_bad_aud.json.return_value = {
+                "email": "badaud@example.com",
+                "name": "Bad Aud User",
+                "email_verified": True,
+                "iss": "accounts.google.com",
+                "aud": "wrong-client-id.apps.googleusercontent.com",
+            }
+            with patch("httpx.get", return_value=mock_resp_bad_aud):
+                res3 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
+                assert res3.status_code in [401, 403]
+        finally:
+            settings.GOOGLE_CLIENT_ID = orig_client_id
+
+    def test_password_complexity_validation(self, client, admin_user):
+        """Ensure password schema requires uppercase, lowercase, digit, and special character."""
+        admin_headers = get_auth_header(client, admin_user["username"], admin_user["password"])
+
+        # Missing uppercase
+        res1 = client.post("/api/auth/register", json={
+            "email": "weak1@example.com",
+            "username": "weakuser1",
+            "password": "password123!",
+            "role": "staff",
+        }, headers=admin_headers)
+        assert res1.status_code == 422
+
+        # Missing digit
+        res2 = client.post("/api/auth/register", json={
+            "email": "weak2@example.com",
+            "username": "weakuser2",
+            "password": "Password!",
+            "role": "staff",
+        }, headers=admin_headers)
+        assert res2.status_code == 422
+
+        # Missing special char
+        res3 = client.post("/api/auth/register", json={
+            "email": "weak3@example.com",
+            "username": "weakuser3",
+            "password": "Password123",
+            "role": "staff",
+        }, headers=admin_headers)
+        assert res3.status_code == 422
+
+        # Valid strong password
+        res4 = client.post("/api/auth/register", json={
+            "email": "strong@example.com",
+            "username": "stronguser",
+            "password": "StrongPassword123!",
+            "role": "staff",
+        }, headers=admin_headers)
+        assert res4.status_code == 200

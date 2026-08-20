@@ -68,13 +68,13 @@ def test_vendor_service_prefetched_stock_processing(db):
     """Verify multi-row Excel parsing properly chains opening and closing stocks in-memory."""
     loc = db.query(Location).first()
     if not loc:
-        loc = Location(name="Warehouse Beta", type="warehouse", region="West")
+        loc = Location(org_id=1, name="Warehouse Beta", type="warehouse", region="West")
         db.add(loc)
         db.commit()
 
     item = db.query(Item).first()
     if not item:
-        item = Item(name="Ceftriaxone 1g", category="Antibiotics", unit="Vials", lead_time_days=2, min_stock=20)
+        item = Item(org_id=1, name="Ceftriaxone 1g", category="Antibiotics", unit="Vials", lead_time_days=2, min_stock=20)
         db.add(item)
         db.commit()
 

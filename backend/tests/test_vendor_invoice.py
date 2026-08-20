@@ -42,11 +42,12 @@ def test_generate_invoice_number(db, admin_user):
     user = db.query(User).filter(User.username == admin_user["username"]).first()
     loc = db.query(Location).first()
     if not loc:
-        loc = Location(name="Main Depot", type="warehouse", region="East")
+        loc = Location(org_id=1, name="Main Depot", type="warehouse", region="East")
         db.add(loc)
         db.commit()
 
     upload = VendorUpload(
+        org_id=1,
         vendor_user_id=user.id,
         filename="test.xlsx",
         location_id=loc.id,
@@ -58,6 +59,7 @@ def test_generate_invoice_number(db, admin_user):
     db.commit()
 
     repo.create(
+        org_id=1,
         vendor_user_id=user.id,
         vendor_upload_id=upload.id,
         invoice_number=inv1,
@@ -70,6 +72,33 @@ def test_generate_invoice_number(db, admin_user):
 
     inv2 = repo.generate_next_invoice_number(test_date)
     assert inv2 == "INV-20291125-002"
+
+    # Test collision resilience: if repo.create is given an already existing invoice_number, it auto-retries and succeeds
+    upload2 = VendorUpload(
+        org_id=1,
+        vendor_user_id=user.id,
+        filename="test2.xlsx",
+        location_id=loc.id,
+        total_rows=1,
+        success_rows=1,
+        status="COMPLETED",
+    )
+    db.add(upload2)
+    db.commit()
+
+    # Pass inv1 intentionally (simulating simultaneous request collision)
+    invoice_collided = repo.create(
+        org_id=1,
+        vendor_user_id=user.id,
+        vendor_upload_id=upload2.id,
+        invoice_number=inv1,  # collision
+        invoice_date=test_date,
+        line_items=[{"item_name": "Ibuprofen", "qty": 5, "unit_price": 20.0, "total": 100.0}],
+        subtotal=100.0,
+        tax_amount=18.0,
+        total_amount=118.0,
+    )
+    assert invoice_collided.invoice_number == "INV-20291125-002"
 
 
 
@@ -147,13 +176,13 @@ def test_vendor_upload_creates_invoice(db):
 
     loc = db.query(Location).first()
     if not loc:
-        loc = Location(name="Central Depot", type="warehouse", region="Kolkata")
+        loc = Location(org_id=1, name="Central Depot", type="warehouse", region="Kolkata")
         db.add(loc)
         db.commit()
 
     item = db.query(Item).first()
     if not item:
-        item = Item(name="Amoxicillin 500mg", category="Antibiotics", unit="Capsules", lead_time_days=3, min_stock=50)
+        item = Item(org_id=1, name="Amoxicillin 500mg", category="Antibiotics", unit="Capsules", lead_time_days=3, min_stock=50)
         db.add(item)
         db.commit()
 

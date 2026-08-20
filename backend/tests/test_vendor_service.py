@@ -26,6 +26,7 @@ class TestVendorService:
 
         # Upload tracking
         upload = VendorUpload(
+            org_id=1,
             vendor_user_id=1,
             filename="test.xlsx",
             location_id=1,

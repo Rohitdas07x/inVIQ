@@ -116,7 +116,7 @@ def test_staff_permitted_branch_enforcement(client: TestClient, db):
     assert res_disp_ok.status_code == 200
     disp_data = res_disp_ok.json()["data"]
     assert disp_data["dispensed_quantity"] == 5
-    assert disp_data["remaining_stock"] == 115  # 20 (min_stock) + 100 received - 5 issued
+    assert disp_data["remaining_stock"] == 95  # 0 initial opening stock + 100 received - 5 issued
 
 
 def test_atomic_stock_ledger_and_insufficient_stock(client: TestClient, db):
@@ -166,9 +166,9 @@ def test_atomic_stock_ledger_and_insufficient_stock(client: TestClient, db):
         headers=headers,
     )
     assert res1.status_code == 200
-    assert res1.json()["data"]["closing_stock"] == 50  # 10 default + 40
+    assert res1.json()["data"]["closing_stock"] == 40  # 0 initial + 40 received
 
-    # 2. Issue 30 units -> remaining 20
+    # 2. Issue 30 units -> remaining 10
     res2 = client.post(
         "/api/inventory/transaction",
         json={
@@ -183,9 +183,9 @@ def test_atomic_stock_ledger_and_insufficient_stock(client: TestClient, db):
         headers=headers,
     )
     assert res2.status_code == 200
-    assert res2.json()["data"]["closing_stock"] == 20
+    assert res2.json()["data"]["closing_stock"] == 10
 
-    # 3. Attempt to issue 25 units when only 20 available -> Insufficient Stock (400 or 422)
+    # 3. Attempt to issue 15 units when only 10 available -> Insufficient Stock (400 or 422)
     res3 = client.post(
         "/api/inventory/transaction",
         json={
@@ -193,16 +193,16 @@ def test_atomic_stock_ledger_and_insufficient_stock(client: TestClient, db):
             "item_id": item.id,
             "date": "2026-06-12",
             "received": 0,
-            "issued": 25,
+            "issued": 15,
             "batch_number": "PCM-01",
         },
         headers=headers,
     )
     assert res3.status_code in (400, 422)
 
-    # 4. Check stock ledger remains unchanged at 20
+    # 4. Check stock ledger remains unchanged at 10
     stock_res = client.get(f"/api/inventory/stock/{loc.id}/{item.id}", headers=headers)
-    assert stock_res.json()["current_stock"] == 20
+    assert stock_res.json()["current_stock"] == 10
 
 
 def test_batch_aware_fefo_dispensing(client: TestClient, db):
@@ -395,9 +395,9 @@ def test_requisition_lifecycle_and_tenant_authorization(client: TestClient, db):
     assert res_appr.status_code == 200
     assert res_appr.json()["data"]["status"] == "APPROVED"
 
-    # Stock should now be 60 - 20 = 40
+    # Stock should now be 50 - 20 = 30 (0 initial opening + 50 received - 20 approved)
     stock_after = InventoryService.get_latest_stock_static(db, loc_1.id, item_1.id)
-    assert stock_after == 40
+    assert stock_after == 30
 
     # 4. Fulfill requisition upon dispatch -> Status FULFILLED
     res_ful = client.put(f"/api/requisition/{req_id}/fulfill", json={}, headers=headers_staff1)

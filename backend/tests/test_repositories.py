@@ -26,11 +26,12 @@ class TestInventoryRepository:
         """Verify location and item creation with storage temp flags and querying."""
         repo = InventoryRepository(db)
         loc_name = _uid("warehouse-")
-        loc = repo.create_location(name=loc_name, type="warehouse", region="North")
+        loc = repo.create_location(org_id=1, name=loc_name, type="warehouse", region="North")
         assert loc.id is not None
         assert repo.get_location_by_name(loc_name).type == "warehouse"
 
         item = repo.create_item(
+            org_id=1,
             name=_uid("Insulin-"),
             category="Diabetic Care",
             unit="vial",
@@ -45,8 +46,8 @@ class TestInventoryRepository:
     def test_inventory_transactions_and_timeline(self, db):
         """Verify transaction creation with batch/expiry and latest/previous queries."""
         repo = InventoryRepository(db)
-        location = repo.create_location(name=_uid("timeline-loc-"), type="clinic", region="Test")
-        item = repo.create_item(name=_uid("timeline-item-"), category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = repo.create_location(org_id=1, name=_uid("timeline-loc-"), type="clinic", region="Test")
+        item = repo.create_item(org_id=1, name=_uid("timeline-item-"), category="medicine", unit="box", lead_time_days=7, min_stock=50)
 
         # 1. Inbound with batch info
         tx1 = repo.create_transaction(
@@ -74,7 +75,7 @@ class TestRequisitionRepository:
 
     def test_requisition_lifecycle_and_counts(self, db):
         """Create, fetch, and count requisitions by status and prefix."""
-        location = Location(name=_uid("req-loc-"), type="clinic", region="Test")
+        location = Location(org_id=1, name=_uid("req-loc-"), type="clinic", region="Test")
         db.add(location)
         db.commit()
 
@@ -130,3 +131,43 @@ class TestUserRepository:
         user = repo.record_login(user)
         assert user.login_attempts == 0
         assert user.last_login_at is not None
+
+
+class TestMultiTenantExplicitOrgRequired:
+    """Ensure repositories reject missing org_id without ever silently falling back to Org 1."""
+
+    def test_create_location_without_org_id_raises_validation_error(self, db):
+        from app.core.exceptions import ValidationError
+        repo = InventoryRepository(db)
+        with pytest.raises(ValidationError, match="Organization ID .* is required"):
+            repo.create_location(name="Orphan Location", type="clinic", region="North")
+
+    def test_create_item_without_org_id_raises_validation_error(self, db):
+        from app.core.exceptions import ValidationError
+        repo = InventoryRepository(db)
+        with pytest.raises(ValidationError, match="Organization ID .* is required"):
+            repo.create_item(name="Orphan Item", category="Medicine", unit="box")
+
+    def test_create_import_job_without_org_id_raises_validation_error(self, db):
+        from app.core.exceptions import ValidationError
+        from app.infrastructure.database.data_import_repo import DataImportRepository
+        repo = DataImportRepository(db)
+        with pytest.raises(ValidationError, match="Organization ID .* is required"):
+            repo.create_job(uploaded_by_user_id=1, filename="test.csv", target_entity="item", org_id=None)
+
+    def test_create_invoice_without_org_id_raises_validation_error(self, db):
+        from app.core.exceptions import ValidationError
+        from app.infrastructure.database.invoice_repo import InvoiceRepository
+        repo = InvoiceRepository(db)
+        with pytest.raises(ValidationError, match="Organization ID .* is required"):
+            repo.create(
+                vendor_user_id=1,
+                vendor_upload_id=1,
+                invoice_number="INV-20260409-999",
+                invoice_date=date.today(),
+                line_items=[],
+                subtotal=0.0,
+                tax_amount=0.0,
+                total_amount=0.0,
+                org_id=None,
+            )

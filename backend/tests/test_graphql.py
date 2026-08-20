@@ -118,8 +118,8 @@ class TestGraphQLHeatmap:
         from app.infrastructure.database.models import Location, Item, InventoryTransaction
         from datetime import date
 
-        loc = Location(name="QL-Loc", type="clinic", region="Test")
-        item = Item(name="QL-Item", category="medicine", unit="box",
+        loc = Location(org_id=1, name="QL-Loc", type="clinic", region="Test")
+        item = Item(org_id=1, name="QL-Item", category="medicine", unit="box",
                     lead_time_days=7, min_stock=10)
         db.add_all([loc, item])
         db.commit()

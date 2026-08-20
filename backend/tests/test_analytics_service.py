@@ -58,8 +58,8 @@ class TestAnalyticsService:
         from app.infrastructure.database.models import Location, Item, InventoryTransaction
         from datetime import date
         
-        location = Location(name="Test Location", type="clinic", region="Test")
-        item = Item(name="Test Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
+        location = Location(org_id=1, name="Test Location", type="clinic", region="Test")
+        item = Item(org_id=1, name="Test Item", category="medicine", unit="box", lead_time_days=7, min_stock=50)
         db.add_all([location, item])
         db.commit()
         db.refresh(location)

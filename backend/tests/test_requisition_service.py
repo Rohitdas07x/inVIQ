@@ -25,7 +25,9 @@ class TestRequisitionService:
 
     @pytest.fixture
     def mock_inv_repo(self):
-        return Mock()
+        repo = Mock()
+        repo.has_later_transactions.return_value = False
+        return repo
 
     @pytest.fixture
     def service(self, mock_req_repo, mock_inv_repo):
@@ -60,6 +62,41 @@ class TestRequisitionService:
         )
         assert result["success"] is True
         assert "REQ-" in result["data"]["requisition_number"]
+
+    def test_create_requisition_collision_retry(self, service, mock_req_repo):
+        """If a collision occurs on first attempt, service retries and succeeds."""
+        from app.core.exceptions import DuplicateError
+
+        mock_location = Mock(id=1, name="Test Location")
+        mock_req_repo.get_location.return_value = mock_location
+
+        mock_item = Mock(id=1, name="Test Item")
+        mock_req_repo.get_item.return_value = mock_item
+
+        mock_requisition = Mock(
+            id=2,
+            requisition_number="REQ-20260409-002",
+            location=mock_location,
+            items=[],
+            status="PENDING",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+
+        # First call raises DuplicateError (simulating collision), second call succeeds
+        mock_req_repo.create.side_effect = [DuplicateError("duplicate number"), mock_requisition]
+        mock_req_repo.count_by_prefix.side_effect = [0, 1]
+
+        result = service.create_requisition(
+            location_id=1,
+            requested_by="testuser",
+            department="Pharmacy",
+            urgency="NORMAL",
+            items=[{"item_id": 1, "quantity": 10}],
+        )
+        assert result["success"] is True
+        assert result["data"]["requisition_number"] == "REQ-20260409-002"
+        assert mock_req_repo.create.call_count == 2
 
     def test_create_requisition_validation_errors(self, service, mock_req_repo):
         """Rejects invalid location, invalid urgency, and zero quantities."""

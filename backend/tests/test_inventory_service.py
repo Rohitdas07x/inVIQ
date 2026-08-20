@@ -19,15 +19,31 @@ class TestInventoryService:
     @pytest.fixture
     def mock_repo(self):
         """Create a mock repository."""
-        return Mock()
+        repo = Mock()
+        repo.has_later_transactions.return_value = False
+        return repo
 
     @pytest.fixture
     def service(self, mock_repo):
         """Create service with mock repository."""
         return InventoryService(mock_repo)
 
+    def test_add_transaction_rejects_backdated(self, service, mock_repo):
+        """Backdated transaction should raise ValidationError if later transactions exist."""
+        mock_repo.has_later_transactions.return_value = True
+
+        with pytest.raises(ValidationError) as exc:
+            service.add_transaction(
+                location_id=1,
+                item_id=1,
+                transaction_date=date(2026, 3, 1),
+                received=50,
+                issued=0,
+            )
+        assert "Backdated inventory transactions are not permitted" in str(exc.value)
+
     def test_add_transaction_first_transaction(self, service, mock_repo):
-        """First transaction should use item min_stock as opening."""
+        """First transaction should use 0 as initial opening stock."""
         mock_repo.get_previous_transaction.return_value = None
         mock_item = Mock()
         mock_item.min_stock = 100
@@ -47,8 +63,8 @@ class TestInventoryService:
         )
 
         assert result["success"] is True
-        assert result["data"]["opening_stock"] == 100
-        assert result["data"]["closing_stock"] == 150
+        assert result["data"]["opening_stock"] == 0
+        assert result["data"]["closing_stock"] == 50
 
     def test_add_transaction_passes_batch_info(self, service, mock_repo):
         """batch_number and expiry_date should be forwarded to create_transaction."""
@@ -148,7 +164,9 @@ class TestInventoryService:
 
     def test_add_transaction_stock_alert_critical(self, service, mock_repo):
         """Transaction resulting in zero stock should trigger critical alert."""
-        mock_repo.get_previous_transaction.return_value = None
+        mock_prev = Mock()
+        mock_prev.closing_stock = 50
+        mock_repo.get_previous_transaction.return_value = mock_prev
         mock_item = Mock()
         mock_item.min_stock = 50
         mock_item.name = "Critical Item"
@@ -164,7 +182,7 @@ class TestInventoryService:
             item_id=1,
             transaction_date=date(2026, 4, 4),
             received=0,
-            issued=50,  # Reduces to 0
+            issued=50,  # Reduces from 50 to 0
         )
 
         assert result["success"] is True

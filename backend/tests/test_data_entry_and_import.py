@@ -303,5 +303,5 @@ def test_inventory_movement_audit_and_batch_expiry_tracking(client, db):
     assert str(tx.expiry_date) == "2028-05-01"
     assert tx.notes == "Direct supplier consignment received"
     assert tx.received == 80
-    assert tx.closing_stock == 90  # 10 (default min_stock) + 80 received
+    assert tx.closing_stock == 80  # 0 (initial opening stock) + 80 received
 

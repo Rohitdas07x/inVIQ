@@ -46,3 +46,39 @@ def test_send_admin_congratulations_success():
         mock_server.starttls.assert_called_once()
         mock_server.login.assert_called_once_with("test@inviq.io", "secretpassword")
         mock_server.sendmail.assert_called_once()
+
+
+def test_send_welcome_email_with_activation_link():
+    with (
+        patch("app.application.notification_service.settings") as s,
+        patch("smtplib.SMTP") as mock_smtp,
+    ):
+        s.SMTP_ENABLED = True
+        s.SMTP_HOST = "smtp.gmail.com"
+        s.SMTP_PORT = 587
+        s.SMTP_USER = "test@inviq.io"
+        s.SMTP_PASSWORD = "secretpassword"
+        s.SMTP_FROM_EMAIL = "noreply@inviq.io"
+        s.SMTP_FROM_NAME = "InvIQ"
+        s.FRONTEND_URL = "http://localhost:5173"
+        s.PROJECT_NAME = "InvIQ"
+
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        res = NotificationService.send_welcome_email(
+            to_email="staff@example.com",
+            username="staff_member",
+            role="staff",
+            full_name="Staff Member",
+            activation_link="http://localhost:5173/reset-password?token=mocktoken123",
+        )
+
+        assert res is True
+        mock_server.starttls.assert_called_once()
+        mock_server.sendmail.assert_called_once()
+
+        # Verify sent email recipient and sender
+        call_args = mock_server.sendmail.call_args[0]
+        assert call_args[0] == "noreply@inviq.io"
+        assert call_args[1] == "staff@example.com"

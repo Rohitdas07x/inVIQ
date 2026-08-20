@@ -115,3 +115,54 @@ def test_confirm_import_and_quarantine(client, test_user, db):
     q_data = quarantine_res.json()
     assert q_data["total_quarantined"] == 1
     assert q_data["rows"][0]["reason"] == "VALIDATION_ERROR"
+
+
+def test_execute_import_azure_blob_fallback(db, test_user):
+    """When job.file_content is empty, execute_import downloads from Azure Blob Storage."""
+    from unittest.mock import patch, Mock
+    from app.application.data_import_service import DataImportService
+    from app.infrastructure.database.data_import_repo import DataImportRepository
+    from app.infrastructure.database.models import DataImportJob, Location
+
+    loc = db.query(Location).filter(Location.org_id == 1).first()
+    if not loc:
+        loc = Location(name="Blob Test Location", type="clinic", region="South", org_id=1)
+        db.add(loc)
+        db.commit()
+        db.refresh(loc)
+
+    repo = DataImportRepository(db)
+    csv_bytes = b"item_name,received,date\nAmoxicillin 500mg,25,2026-05-01\n"
+
+    # Create job with NULL file_content but valid file_blob_path
+    job = repo.create_job(
+        uploaded_by_user_id=test_user["user"].id,
+        filename="remote_upload.csv",
+        file_content=None,
+        file_blob_path="imports/2026/08/remote_upload.csv",
+        target_entity="inventory_transaction",
+        mapping_result={
+            "mappings": {
+                "item_name": {"target_field": "item_name", "confidence": 1.0},
+                "received": {"target_field": "received", "confidence": 1.0},
+                "date": {"target_field": "date", "confidence": 1.0},
+            }
+        },
+        org_id=1,
+    )
+
+    service = DataImportService(db)
+
+    # 1. Mock Azure Blob Storage service returning CSV bytes
+    mock_storage = Mock()
+    mock_storage.download_file.return_value = csv_bytes
+
+    with patch("app.infrastructure.storage.azure_blob_storage.get_storage_service", return_value=mock_storage):
+        updated_job = service.execute_import(
+            job_id=job.id,
+            confirmed_mapping=job.mapping_result,
+            default_location_id=loc.id,
+        )
+        assert updated_job.status in ["COMPLETED", "PARTIAL"]
+        assert updated_job.success_rows == 1
+        mock_storage.download_file.assert_called_once_with("imports/2026/08/remote_upload.csv")
