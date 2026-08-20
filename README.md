@@ -421,6 +421,7 @@ InvIQ/
 │   │   ├── infrastructure/       # Database models/repos, Upstash Redis, Azure Blob Storage, Qdrant
 │   │   └── workers/              # Celery background task processing & Celery Beat
 │   ├── benchmark/                # Concurrency benchmarks and Locust load tests
+│   ├── scripts/                  # Super-admin provisioning and data seeding utilities
 │   └── tests/                    # 321 automated unit, integration, and security tests
 ├── frontend/
 │   ├── src/
@@ -429,7 +430,6 @@ InvIQ/
 │   │   ├── context/              # Auth, multi-tenant organization & WebSocket alert context
 │   │   └── services/             # Axios API client with automatic token refresh
 │   └── package.json
-├── database/                     # Legacy schema reference & sample seed fixtures
 ├── docs/                         # HLD, DECISIONS, FLOW, and API reference
 ├── Dockerfile                    # Unified multi-stage production Dockerfile
 ├── docker-compose.yml            # Local dev orchestration
