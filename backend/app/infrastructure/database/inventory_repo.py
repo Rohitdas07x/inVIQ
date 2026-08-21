@@ -226,36 +226,39 @@ class InventoryRepository:
                 InventoryTransaction.location_id == location_id,
                 InventoryTransaction.item_id == item_id,
             )
-            .order_by(InventoryTransaction.date.desc())
+            .order_by(
+                InventoryTransaction.date.desc(),
+                InventoryTransaction.id.desc(),
+            )
             .first()
         )
 
     def get_latest_stocks_for_location(self, location_id: int) -> Dict[int, int]:
         """
         Single query: returns {item_id: closing_stock} for the latest transaction
-        of every item at the given location. Replaces N+1 queries with 1 query.
+        of every item at the given location. Deterministically selects the latest
+        record (max transaction ID per item) to handle same-day transactions accurately.
         """
-        # Subquery: find the max date per item at this location
-        latest_date_sub = (
+        # Subquery: find the max transaction ID per item at this location
+        latest_id_sub = (
             self.db.query(
                 InventoryTransaction.item_id,
-                func.max(InventoryTransaction.date).label("max_date"),
+                func.max(InventoryTransaction.id).label("max_id"),
             )
             .filter(InventoryTransaction.location_id == location_id)
             .group_by(InventoryTransaction.item_id)
             .subquery()
         )
 
-        # Join back to get the closing_stock of that latest row
+        # Join back to get the closing_stock of that latest transaction
         rows = (
             self.db.query(
                 InventoryTransaction.item_id,
                 InventoryTransaction.closing_stock,
             )
             .join(
-                latest_date_sub,
-                (InventoryTransaction.item_id == latest_date_sub.c.item_id)
-                & (InventoryTransaction.date == latest_date_sub.c.max_date),
+                latest_id_sub,
+                InventoryTransaction.id == latest_id_sub.c.max_id,
             )
             .filter(InventoryTransaction.location_id == location_id)
             .all()

@@ -62,12 +62,12 @@ class ReportService:
         """
         Return the latest closing stock for every item scoped to the organization.
 
-        Uses a subquery to select the most-recent transaction date per item,
-        then joins back to get the closing_stock on that date.
+        Uses a subquery to select the most-recent transaction (max ID) per item,
+        then joins back to get the closing_stock on that transaction.
         """
         subquery = self._db.query(
             InventoryTransaction.item_id,
-            func.max(InventoryTransaction.date).label("max_date"),
+            func.max(InventoryTransaction.id).label("max_id"),
         )
         if location_id is not None:
             subquery = subquery.filter(InventoryTransaction.location_id == location_id)
@@ -85,8 +85,7 @@ class ReportService:
             .join(latest_sub, Item.id == latest_sub.c.item_id)
             .join(
                 InventoryTransaction,
-                (InventoryTransaction.item_id == latest_sub.c.item_id)
-                & (InventoryTransaction.date == latest_sub.c.max_date),
+                InventoryTransaction.id == latest_sub.c.max_id,
             )
         )
         if location_id is not None:

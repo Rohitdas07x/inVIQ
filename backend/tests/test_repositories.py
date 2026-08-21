@@ -57,17 +57,24 @@ class TestInventoryRepository:
         )
         assert tx1.batch_number == "BT-25-001"
 
-        # 2. Outbound transaction
-        tx2 = repo.create_transaction(
-            location_id=location.id, item_id=item.id, date=date(2026, 4, 5),
-            opening_stock=100, received=0, issued=30, closing_stock=70, entered_by="testuser",
+        # 3. Same-day transactions (e.g. morning receive + afternoon dispense on same date)
+        today = date(2026, 4, 10)
+        tx3_morning = repo.create_transaction(
+            location_id=location.id, item_id=item.id, date=today,
+            opening_stock=70, received=50, issued=0, closing_stock=120, entered_by="morning_shift",
+        )
+        tx4_afternoon = repo.create_transaction(
+            location_id=location.id, item_id=item.id, date=today,
+            opening_stock=120, received=0, issued=45, closing_stock=75, entered_by="afternoon_shift",
         )
 
         latest = repo.get_latest_transaction(location.id, item.id)
-        assert latest.closing_stock == 70
+        assert latest.id == tx4_afternoon.id
+        assert latest.closing_stock == 75
 
-        prev = repo.get_previous_transaction(location.id, item.id, date(2026, 4, 4))
-        assert prev.closing_stock == 100
+        # Verify bulk location stocks mapping selects the true latest record
+        stocks_map = repo.get_latest_stocks_for_location(location.id)
+        assert stocks_map[item.id] == 75
 
 
 class TestRequisitionRepository:

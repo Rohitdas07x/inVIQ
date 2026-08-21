@@ -13,12 +13,21 @@ def get_latest_stock_health(
     location_id: Optional[int] = None,
     category: Optional[str] = None,
 ):
-    """Get stock health for most recent date across all locations and items with optional multi-tenant and dimension filters"""
+    """Get stock health for most recent transaction across all locations and items with optional multi-tenant and dimension filters"""
 
     latest_date = db.query(func.max(InventoryTransaction.date)).scalar()
 
     if not latest_date:
         return []
+
+    # Subquery: exact latest transaction per location and item (deterministic tie-break by max ID)
+    latest_tx_sub = (
+        db.query(
+            func.max(InventoryTransaction.id).label("max_id"),
+        )
+        .group_by(InventoryTransaction.location_id, InventoryTransaction.item_id)
+        .subquery()
+    )
 
     subq = (
         db.query(
@@ -79,6 +88,7 @@ def get_latest_stock_health(
             ).label("health_status"),
             InventoryTransaction.date.label("last_updated"),
         )
+        .join(latest_tx_sub, InventoryTransaction.id == latest_tx_sub.c.max_id)
         .join(Location, InventoryTransaction.location_id == Location.id)
         .join(Item, InventoryTransaction.item_id == Item.id)
         .outerjoin(
@@ -86,7 +96,6 @@ def get_latest_stock_health(
             (InventoryTransaction.location_id == subq.c.location_id)
             & (InventoryTransaction.item_id == subq.c.item_id),
         )
-        .filter(InventoryTransaction.date == latest_date)
     )
 
     if org_id is not None:
