@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import httpx
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Request, Response
@@ -732,6 +733,37 @@ def change_password(
     current_user.hashed_password = hash_password(request_body.new_password)
     db.update(current_user)
 
+    # Invalidate existing sessions issued before this password change
+    try:
+        from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+        r = get_redis()
+        if r and is_redis_available():
+            r.setex(f"user_pw_changed:{current_user.id}", 3600 * 24, str(int(time.time())))
+    except Exception as e:
+        logger.error("Failed to set user_pw_changed in Redis for user %s: %s", current_user.id, str(e))
+
+    # Blacklist caller's current access/refresh tokens to require fresh login
+    try:
+        from app.infrastructure.cache.token_blacklist import (
+            blacklist_token,
+            blacklist_refresh_token,
+        )
+        access_token = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+        elif request.cookies.get("access_token"):
+            access_token = request.cookies.get("access_token")
+
+        if access_token:
+            blacklist_token(access_token)
+
+        refresh_token_str = request.cookies.get("refresh_token")
+        if refresh_token_str:
+            blacklist_refresh_token(refresh_token_str)
+    except Exception as e:
+        logger.error("Failed to blacklist caller tokens on password change for user %s: %s", current_user.id, str(e))
+
     # Audit log
     audit = AuditService(db.db)
     audit.log(
@@ -1077,8 +1109,8 @@ def admin_reset_password(
         r = get_redis()
         if r and is_redis_available():
             r.setex(f"user_pw_changed:{user.id}", 3600 * 24, str(int(time.time())))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("Failed to set user_pw_changed in Redis for user %s: %s", user.id, str(e))
 
     # Audit log
     audit = AuditService(db.db)
@@ -1239,9 +1271,9 @@ def reset_password(
         r = get_redis()
         if r and is_redis_available():
             # Mark this user's session as reset — dependencies.py can check this
-            r.setex(f"user_pw_changed:{user.id}", 3600 * 24, str(int(__import__('time').time())))
-    except Exception:
-        pass
+            r.setex(f"user_pw_changed:{user.id}", 3600 * 24, str(int(time.time())))
+    except Exception as e:
+        logger.error("Failed to set user_pw_changed in Redis for user %s: %s", user.id, str(e))
 
     # Audit log
     audit = AuditService(db.db)
@@ -1333,155 +1365,63 @@ def google_auth(
     request_body: GoogleAuthRequest,
     db: Session = Depends(get_user_repo),
 ):
-
     """Authenticate or register user via Google OAuth."""
+    client_id = (settings.GOOGLE_CLIENT_ID or "").strip()
+    if not client_id:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "Google OAuth is not configured on this server.",
+                },
+            },
+        )
+
     try:
-        google_user = None
-        # Try cryptographic verification with google-auth if available
-        try:
-            from google.oauth2 import id_token as google_id_token
-            from google.auth.transport import requests as google_requests
-            id_info = google_id_token.verify_oauth2_token(
-                request_body.id_token,
-                google_requests.Request(),
-                settings.GOOGLE_CLIENT_ID if settings.GOOGLE_CLIENT_ID else None,
-            )
-            google_user = id_info
-        except Exception:
-            # Fallback to Google OAuth verify endpoint (e.g. for mocked tests or tokeninfo endpoint)
-            response_ext = httpx.get(
-                settings.GOOGLE_OAUTH_VERIFY_URL,
-                headers={"Authorization": f"Bearer {request_body.id_token}"},
-                timeout=10,
-            )
-            if response_ext.status_code != 200:
-                raise AuthenticationError("Invalid Google ID token")
-            google_user = response_ext.json()
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
 
-        if not google_user:
-            raise AuthenticationError("Failed to retrieve Google profile")
-
-        google_email = google_user.get("email")
-        google_name = google_user.get("name", "")
-
-        if not google_email:
-            raise AuthenticationError("Google account has no email")
-
-        # Mandatory claims verification: email_verified, issuer, audience
-        email_verified = google_user.get("email_verified")
-        if email_verified is None or str(email_verified).lower() not in ["true", "1"]:
-            raise AuthenticationError("Google account email is not verified")
-
-        iss = google_user.get("iss")
-        if not iss or iss not in ["accounts.google.com", "https://accounts.google.com"]:
-            raise AuthenticationError("Invalid Google ID token issuer")
-
-        aud = google_user.get("aud")
-        if settings.GOOGLE_CLIENT_ID:
-            if not aud or aud != settings.GOOGLE_CLIENT_ID:
-                raise AuthenticationError("Google ID token audience mismatch")
-
-        # Check if user exists
-        user = db.get_by_email(google_email)
-
-        if user:
-            # Existing user - log them in
-            if not user.is_active:
-                raise AuthenticationError("User account is disabled")
-
-            db.record_login(user)
-
-            access_token = create_access_token(
-                {
-                    "sub": str(user.id),
-                    "username": user.username,
-                    "role": user.role,
-                    "org_id": user.org_id,
-                }
-            )
-            refresh_token = create_refresh_token(
-                {"sub": str(user.id), "username": user.username}
-            )
-
-            # Set HttpOnly, SameSite cookies
-            _set_auth_cookies(response, access_token, refresh_token)
-
-            audit = AuditService(db.db)
-            audit.log(
-                username=user.username,
-                action="GOOGLE_LOGIN",
-                resource_type="user",
-                resource_id=str(user.id),
-                user_id=user.id,
-                org_id=user.org_id,
-                ip_address=_get_client_ip(request),
-            )
-
-            json_resp = JSONResponse(
-                content={
-                    "success": True,
-                    "message": "Login successful",
-                    "data": {
-                        "token_type": "bearer",
-                        "user": _user_dict(user),
-                    },
-                }
-            )
-            _set_auth_cookies(json_resp, access_token, refresh_token)
-            return json_resp
-
-        # New user - create account as Pharmacy Store Owner (Admin)
-        from app.infrastructure.database.models import Organization, Location
-        import secrets
-
-        # Generate a unique username from email
-        base_username = google_email.split("@")[0].lower().replace(".", "_")
-        username = base_username
-        counter = 1
-        while db.get_by_username(username):
-            username = f"{base_username}_{counter}"
-            counter += 1
-
-        # Create Organization for this Chemist Store Owner
-        base_slug = username.replace("_", "-")
-        slug = base_slug
-        counter = 1
-        while db.db.query(Organization).filter(Organization.slug == slug).first():
-            slug = f"{base_slug}-{counter}"
-            counter += 1
-
-        org_name = f"{google_name or username}'s Pharmacy & Medical Store"
-        new_org = Organization(name=org_name, slug=slug, is_active=True)
-        db.db.add(new_org)
-        db.db.commit()
-        db.db.refresh(new_org)
-
-        # Create default Main Pharmacy Counter location
-        default_location = Location(
-            org_id=new_org.id,
-            name=f"{google_name or username} - Main Counter",
-            type="retail_counter",
-            region="Default Region",
-            address="Main Store Location",
+        id_info = google_id_token.verify_oauth2_token(
+            request_body.id_token,
+            google_requests.Request(),
+            client_id,
         )
-        db.db.add(default_location)
-        db.db.commit()
-        db.db.refresh(default_location)
+    except ValueError as ve:
+        raise AuthenticationError(f"Invalid Google ID token: {str(ve)}")
+    except Exception as e:
+        logger.error("Google OAuth token verification failed: %s", str(e))
+        raise AuthenticationError("Google ID token verification failed")
 
-        # Create user with Google OAuth flag as Admin
-        user = db.create(
-            email=google_email,
-            username=username,
-            password=secrets.token_urlsafe(32),  # Random secure password
-            full_name=google_name,
-            role="admin",  # Pharmacy Owner / Store Admin
-            org_id=new_org.id,
-            location_ids=[default_location.id],
-        )
+    google_email = id_info.get("email")
+    google_name = id_info.get("name", "")
 
-        user.is_verified = True
-        user.is_active = True
-        db.update(user)
+    if not google_email:
+        raise AuthenticationError("Google account has no email")
+
+    # Mandatory claims verification: email_verified, issuer, audience
+    email_verified = id_info.get("email_verified")
+    if email_verified is None or str(email_verified).lower() not in ["true", "1"]:
+        raise AuthenticationError("Google account email is not verified")
+
+    iss = id_info.get("iss")
+    if not iss or iss not in ["accounts.google.com", "https://accounts.google.com"]:
+        raise AuthenticationError("Invalid Google ID token issuer")
+
+    aud = id_info.get("aud")
+    if not aud or aud != client_id:
+        raise AuthenticationError("Google ID token audience mismatch")
+
+    # Check if user exists
+    user = db.get_by_email(google_email)
+
+    if user:
+        # Existing user - log them in
+        if not user.is_active:
+            raise AuthenticationError("User account is disabled")
+
+        db.record_login(user)
 
         access_token = create_access_token(
             {
@@ -1495,22 +1435,24 @@ def google_auth(
             {"sub": str(user.id), "username": user.username}
         )
 
+        # Set HttpOnly, SameSite cookies
+        _set_auth_cookies(response, access_token, refresh_token)
+
         audit = AuditService(db.db)
         audit.log(
             username=user.username,
-            action="GOOGLE_REGISTER",
+            action="GOOGLE_LOGIN",
             resource_type="user",
             resource_id=str(user.id),
             user_id=user.id,
             org_id=user.org_id,
-            details={"email": google_email},
             ip_address=_get_client_ip(request),
         )
 
         json_resp = JSONResponse(
             content={
                 "success": True,
-                "message": "Account created successfully via Google",
+                "message": "Login successful",
                 "data": {
                     "token_type": "bearer",
                     "user": _user_dict(user),
@@ -1520,9 +1462,94 @@ def google_auth(
         _set_auth_cookies(json_resp, access_token, refresh_token)
         return json_resp
 
+    # New user - create account as Staff (never auto-provision as admin)
+    from app.infrastructure.database.models import Organization, Location
+    import secrets
 
-    except httpx.RequestError as e:
-        logger.error(f"Google OAuth error: {e}")
-        raise AuthenticationError("Failed to verify Google account")
+    # Generate a unique username from email
+    base_username = google_email.split("@")[0].lower().replace(".", "_")
+    username = base_username
+    counter = 1
+    while db.get_by_username(username):
+        username = f"{base_username}_{counter}"
+        counter += 1
+
+    # Create Organization for this registered user
+    base_slug = username.replace("_", "-")
+    slug = base_slug
+    counter = 1
+    while db.db.query(Organization).filter(Organization.slug == slug).first():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    org_name = f"{google_name or username}'s Pharmacy & Medical Store"
+    new_org = Organization(name=org_name, slug=slug, is_active=True)
+    db.db.add(new_org)
+    db.db.commit()
+    db.db.refresh(new_org)
+
+    # Create default Main Pharmacy Counter location
+    default_location = Location(
+        org_id=new_org.id,
+        name=f"{google_name or username} - Main Counter",
+        type="retail_counter",
+        region="Default Region",
+        address="Main Store Location",
+    )
+    db.db.add(default_location)
+    db.db.commit()
+    db.db.refresh(default_location)
+
+    # Create user with Google OAuth as staff (never admin)
+    user = db.create(
+        email=google_email,
+        username=username,
+        password=secrets.token_urlsafe(32),  # Random secure password
+        full_name=google_name,
+        role="staff",  # Safe default: staff role (never admin)
+        org_id=new_org.id,
+        location_ids=[default_location.id],
+    )
+
+    user.is_verified = True
+    user.is_active = True
+    db.update(user)
+
+    access_token = create_access_token(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role,
+            "org_id": user.org_id,
+        }
+    )
+    refresh_token = create_refresh_token(
+        {"sub": str(user.id), "username": user.username}
+    )
+
+    audit = AuditService(db.db)
+    audit.log(
+        username=user.username,
+        action="GOOGLE_REGISTER",
+        resource_type="user",
+        resource_id=str(user.id),
+        user_id=user.id,
+        org_id=user.org_id,
+        details={"email": google_email},
+        ip_address=_get_client_ip(request),
+    )
+
+    json_resp = JSONResponse(
+        content={
+            "success": True,
+            "message": "Account created successfully via Google",
+            "data": {
+                "token_type": "bearer",
+                "user": _user_dict(user),
+            },
+        }
+    )
+    _set_auth_cookies(json_resp, access_token, refresh_token)
+    return json_resp
 
 

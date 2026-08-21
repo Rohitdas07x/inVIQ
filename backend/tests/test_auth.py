@@ -212,52 +212,67 @@ class TestRBACAndTenantIsolation:
             test_user["user"].role = "staff"
 
     def test_google_auth_strict_claims_validation(self, client):
-        """Google auth should reject unverified email or mismatched audience."""
-        from unittest.mock import patch, Mock
-
-        # 1. Unverified email
-        mock_resp_unverified = Mock()
-        mock_resp_unverified.status_code = 200
-        mock_resp_unverified.json.return_value = {
-            "email": "unverified@example.com",
-            "name": "Unverified User",
-            "email_verified": False,
-            "iss": "accounts.google.com",
-        }
-        with patch("httpx.get", return_value=mock_resp_unverified):
-            res1 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
-            assert res1.status_code in [401, 403]
-
-        # 2. Invalid issuer
-        mock_resp_bad_iss = Mock()
-        mock_resp_bad_iss.status_code = 200
-        mock_resp_bad_iss.json.return_value = {
-            "email": "badiss@example.com",
-            "name": "Bad Iss User",
-            "email_verified": True,
-            "iss": "evil.com",
-        }
-        with patch("httpx.get", return_value=mock_resp_bad_iss):
-            res2 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
-            assert res2.status_code in [401, 403]
-
-        # 3. Audience mismatch
+        """Google auth should return 503 if client ID is unset, and reject invalid claims."""
+        from unittest.mock import patch
+        import google.oauth2.id_token
         from app.core.config import settings
+
         orig_client_id = settings.GOOGLE_CLIENT_ID
         try:
+            # 1. When GOOGLE_CLIENT_ID is unset/empty -> 503 Service Unavailable
+            settings.GOOGLE_CLIENT_ID = ""
+            res_unset = client.post("/api/auth/google-auth", json={"id_token": "any-token"})
+            assert res_unset.status_code == 503
+
+            # Set valid client ID for verification tests
             settings.GOOGLE_CLIENT_ID = "expected-client-id.apps.googleusercontent.com"
-            mock_resp_bad_aud = Mock()
-            mock_resp_bad_aud.status_code = 200
-            mock_resp_bad_aud.json.return_value = {
+
+            # 2. Unverified email
+            with patch("google.oauth2.id_token.verify_oauth2_token", return_value={
+                "email": "unverified@example.com",
+                "name": "Unverified User",
+                "email_verified": False,
+                "iss": "accounts.google.com",
+                "aud": "expected-client-id.apps.googleusercontent.com",
+            }):
+                res1 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
+                assert res1.status_code in [401, 403]
+
+            # 3. Invalid issuer
+            with patch("google.oauth2.id_token.verify_oauth2_token", return_value={
+                "email": "badiss@example.com",
+                "name": "Bad Iss User",
+                "email_verified": True,
+                "iss": "evil.com",
+                "aud": "expected-client-id.apps.googleusercontent.com",
+            }):
+                res2 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
+                assert res2.status_code in [401, 403]
+
+            # 4. Audience mismatch
+            with patch("google.oauth2.id_token.verify_oauth2_token", return_value={
                 "email": "badaud@example.com",
                 "name": "Bad Aud User",
                 "email_verified": True,
                 "iss": "accounts.google.com",
                 "aud": "wrong-client-id.apps.googleusercontent.com",
-            }
-            with patch("httpx.get", return_value=mock_resp_bad_aud):
+            }):
                 res3 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
                 assert res3.status_code in [401, 403]
+
+            # 5. Successful registration creates user as STAFF (never admin)
+            with patch("google.oauth2.id_token.verify_oauth2_token", return_value={
+                "email": "newgoogleuser@example.com",
+                "name": "Google Staff User",
+                "email_verified": True,
+                "iss": "https://accounts.google.com",
+                "aud": "expected-client-id.apps.googleusercontent.com",
+            }):
+                res_ok = client.post("/api/auth/google-auth", json={"id_token": "valid-token"})
+                assert res_ok.status_code == 200
+                user_data = res_ok.json()["data"]["user"]
+                assert user_data["role"] == "staff"
+
         finally:
             settings.GOOGLE_CLIENT_ID = orig_client_id
 
