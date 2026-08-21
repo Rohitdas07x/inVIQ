@@ -15,6 +15,86 @@
 #   docker compose -f docker-compose.prod.yml logs -f app
 #   docker compose -f docker-compose.prod.yml down
 
+x-backend-env: &backend-env
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  PROJECT_NAME: "Smart Inventory Assistant"
+  
+  # Database (PostgreSQL)
+  DATABASE_URL: ${DATABASE_URL}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+  
+  # Redis / Celery Broker (Upstash Redis)
+  REDIS_URL: ${REDIS_URL}
+  REDIS_ENABLED: ${REDIS_ENABLED:-true}
+  
+  # Frontend & CORS
+  FRONTEND_URL: ${FRONTEND_URL}
+  CORS_ORIGINS: ${CORS_ORIGINS}
+  
+  # AI / LLM (Groq)
+  GROQ_API_KEY: ${GROQ_API_KEY}
+  LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
+  
+  # Gemini Embeddings & Vector Store (Qdrant)
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+  QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+  QDRANT_URL: ${QDRANT_URL:-}
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-chat_memory}
+  
+  # Sarvam AI (Voice / STT)
+  SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+  
+  # LangSmith (Observability)
+  LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+  LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-InvIQ}
+  LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+  LANGCHAIN_ENDPOINT: ${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+  
+  # Security
+  SECRET_KEY: ${SECRET_KEY}
+  ALGORITHM: ${ALGORITHM:-HS256}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+  REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+  
+  # Login Lockout
+  MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+  LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-15}
+  
+  # Admin Accounts
+  SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@example.com}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@inventory.local}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-System Administrator}
+  
+  # Rate Limiting
+  RATE_LIMIT_DEFAULT: ${RATE_LIMIT_DEFAULT:-60/minute}
+  RATE_LIMIT_AUTH: ${RATE_LIMIT_AUTH:-5/minute}
+  
+  # SMTP (Email Notifications)
+  SMTP_ENABLED: ${SMTP_ENABLED:-false}
+  SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-InvIQ Smart Inventory}
+  
+  # Google OAuth
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  
+  # Storage
+  AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
+  AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
+  AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
+  AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+
 services:
   # ── 1. FastAPI Application ────────────────────────────────────────────────
   app:
@@ -26,74 +106,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Application
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      PROJECT_NAME: "Smart Inventory Assistant"
-      
-      # Database (Supabase PostgreSQL)
-      DATABASE_URL: ${DATABASE_URL}
-      
-      # Redis / Celery Broker (Upstash Redis)
-      REDIS_URL: ${REDIS_URL}
-      REDIS_ENABLED: ${REDIS_ENABLED:-true}
-      
-      # Frontend & CORS
-      FRONTEND_URL: ${FRONTEND_URL}
-      CORS_ORIGINS: ${CORS_ORIGINS}
-      
-      # AI / LLM (Groq)
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
-      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
-      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
-      
-      # LangSmith (Optional)
-      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
-      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-InvIQ}
-      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
-      LANGCHAIN_ENDPOINT: ${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
-      
-      # Qdrant Cloud (Vector Store for RAG)
-      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
-      QDRANT_URL: ${QDRANT_URL:-}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-chat_memory}
-      
-      # Security
-      SECRET_KEY: ${SECRET_KEY}
-      ALGORITHM: ${ALGORITHM:-HS256}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-      
-      # Login Lockout
-      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
-      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-15}
-      
-      # Admin Accounts
-      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-admin@example.com}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@inventory.local}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-System Administrator}
-      
-      # Rate Limiting
-      RATE_LIMIT_DEFAULT: ${RATE_LIMIT_DEFAULT:-60/minute}
-      RATE_LIMIT_AUTH: ${RATE_LIMIT_AUTH:-5/minute}
-      
-      # SMTP (Email Notifications)
-      SMTP_ENABLED: ${SMTP_ENABLED:-false}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
-      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-InvIQ Smart Inventory}
-      
-      # Storage
-      AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
-      AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
-      AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
-      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+      <<: *backend-env
 
     volumes:
       - ./logs:/app/logs
@@ -121,20 +134,7 @@ services:
       app:
         condition: service_started
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      PROJECT_NAME: "Smart Inventory Assistant"
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      REDIS_ENABLED: ${REDIS_ENABLED:-true}
-      SECRET_KEY: ${SECRET_KEY}
-      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
-      QDRANT_URL: ${QDRANT_URL:-}
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      SMTP_ENABLED: ${SMTP_ENABLED:-false}
-      AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-inviq-documents}
-      AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
-      AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
-      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+      <<: *backend-env
     volumes:
       - ./logs:/app/logs
     networks:
@@ -153,12 +153,7 @@ services:
       celery_worker:
         condition: service_started
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      PROJECT_NAME: "Smart Inventory Assistant"
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
-      REDIS_ENABLED: ${REDIS_ENABLED:-true}
-      SECRET_KEY: ${SECRET_KEY}
+      <<: *backend-env
     volumes:
       - ./logs:/app/logs
     networks:
