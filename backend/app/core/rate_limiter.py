@@ -33,22 +33,46 @@ logger = logging.getLogger("smart_inventory.rate_limit")
 
 # ── Key functions ─────────────────────────────────────────────────────────
 
+def get_client_ip(request: Request) -> str:
+    """
+    Extract client IP address safely, handling reverse proxies (X-Forwarded-For, X-Real-IP).
+    """
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # The first IP in the comma-separated list is the client IP
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+
 def get_user_id_or_ip(request: Request) -> str:
     """
-    Rate limit key for authenticated endpoints.
-
-    Uses JWT user ID when available (extracted from the already-decoded
-    user stored by get_current_user), falls back to client IP.
-
-    This means:
-    - Authenticated users: limited per account (fair across shared IPs/NAT)
-    - Unauthenticated: limited per IP (for login, register, etc.)
+    Rate limit key function for API endpoints:
+    1. If Authorization header contains Bearer token (or cookie), extract user ID.
+    2. Fall back to proxy-aware client IP address.
     """
-    # Try to get user id from request state (set by get_current_user dependency)
-    user = getattr(request.state, "user", None)
-    if user and hasattr(user, "id"):
-        return f"user:{user.id}"
-    return get_remote_address(request)
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    elif request.cookies.get("access_token"):
+        token = request.cookies.get("access_token")
+
+    if token:
+        try:
+            from app.core.security import verify_access_token
+            payload = verify_access_token(token)
+            user_id = payload.get("sub")
+            if user_id:
+                return f"user:{user_id}"
+        except Exception:
+            pass
+
+    return get_client_ip(request)
 
 
 def _get_storage_uri() -> str:
@@ -75,7 +99,7 @@ def _get_storage_uri() -> str:
 # ── Limiter instance ──────────────────────────────────────────────────────
 
 limiter = Limiter(
-    key_func=get_remote_address,        # default: per-IP
+    key_func=get_user_id_or_ip,
     storage_uri=_get_storage_uri(),
     default_limits=[settings.RATE_LIMIT_DEFAULT],
     strategy="moving-window",           # accurate, no burst at window reset

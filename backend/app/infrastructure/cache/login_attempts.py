@@ -46,9 +46,13 @@ def record_failed_attempt(username: str) -> int:
         return count
 
     # In-memory fallback
+    logger.warning(
+        "⚠️ SECURITY WARNING: Redis is unavailable. Tracking failed login attempts for '%s' in process-local memory only. "
+        "Brute-force lockout counters are not synchronized across workers.",
+        username,
+    )
     _mem_attempts[username] = _mem_attempts.get(username, 0) + 1
     count = _mem_attempts[username]
-    logger.debug("Failed login attempt #%d for '%s' (in-memory)", count, username)
     return count
 
 

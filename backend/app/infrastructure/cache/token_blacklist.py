@@ -43,14 +43,6 @@ def blacklist_token(token: str, expires_in_minutes: int = None) -> None:
     if expires_in_minutes is None:
         expires_in_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
-    # Invalidate L1 auth cache immediately
-    try:
-        from app.core.dependencies import _user_auth_cache, _user_auth_cache_lock
-        with _user_auth_cache_lock:
-            _user_auth_cache.pop(token, None)
-    except Exception:
-        pass
-
     r = get_redis()
     if r and is_redis_available():
         try:
@@ -65,10 +57,13 @@ def blacklist_token(token: str, expires_in_minutes: int = None) -> None:
             logger.warning("Redis blacklist write failed: %s", e)
 
     # Fallback to in-memory
+    logger.warning(
+        "⚠️ SECURITY WARNING: Redis is unavailable. Blacklisting token in process-local memory only. "
+        "Revocation will not synchronize across other worker processes."
+    )
     _purge_expired_memory_tokens()
     expiry_epoch = time.time() + (expires_in_minutes * 60)
     _memory_blacklist[token] = expiry_epoch
-    logger.debug("Token blacklisted (in-memory fallback)")
 
 
 def is_token_blacklisted(token: str) -> bool:
@@ -105,6 +100,10 @@ def register_reset_jti(jti: str, ttl_seconds: int = 3600) -> None:
         except Exception as e:
             logger.warning("Redis reset JTI write failed: %s", e)
     # Fallback to in-memory
+    logger.warning(
+        "⚠️ SECURITY WARNING: Redis is unavailable. Storing password reset JTI in process-local memory only. "
+        "Single-use guarantee is not synchronized across worker processes."
+    )
     _memory_reset_jtis[jti] = time.time() + ttl_seconds
 
 
@@ -123,6 +122,9 @@ def consume_reset_jti(jti: str) -> bool:
         except Exception as e:
             logger.warning("Redis reset JTI consume failed: %s", e)
     # Fallback to in-memory
+    logger.warning(
+        "⚠️ SECURITY WARNING: Redis is unavailable. Consuming password reset JTI from process-local memory only."
+    )
     now = time.time()
     # Purge expired entries
     expired = [k for k, exp in _memory_reset_jtis.items() if exp < now]

@@ -121,6 +121,8 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 # RequestLoggerMiddleware must run first so it can pass WebSocket upgrade
 # connections straight through (scope["type"] == "websocket") before
 # CORSMiddleware processes them.
+from slowapi.middleware import SlowAPIMiddleware
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

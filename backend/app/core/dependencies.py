@@ -62,11 +62,10 @@ def get_requisition_service(
 # ── Authentication dependency (FastAPI tutorial pattern) ───────────────────
 
 
-import time
-import threading
+import logging
+from sqlalchemy.exc import SQLAlchemyError
 
-_user_auth_cache = {}
-_user_auth_cache_lock = threading.Lock()
+logger = logging.getLogger("smart_inventory.dependencies")
 
 
 def get_current_user(
@@ -76,7 +75,8 @@ def get_current_user(
 ) -> User:
     """
     Decode and validate the Bearer JWT token or HttpOnly cookie on every protected request.
-    Uses fast L1 memory cache (30s) to avoid redundant DB and Redis round-trips.
+    Verifies JWT signature, expiration, and blacklisting on every request.
+    Loads and returns the User entity bound to the active request database session.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,57 +90,15 @@ def get_current_user(
     if not token:
         raise credentials_exception
 
-    # 1. Fast L1 auth cache check (<0.05ms) — cache validated user_id to skip JWT + Redis decode
-
-    now = time.time()
-    cached_user_id = None
-    with _user_auth_cache_lock:
-        cached = _user_auth_cache.get(token)
-        if cached is not None:
-            exp_ts, uid = cached
-            if now < exp_ts:
-                cached_user_id = uid
-            else:
-                _user_auth_cache.pop(token, None)
-
-    if cached_user_id is not None:
-        # ── Check blacklist FIRST — a logged-out token must not ride the L1 cache ──
-        from app.infrastructure.cache.token_blacklist import is_token_blacklisted
-        if is_token_blacklisted(token):
-            with _user_auth_cache_lock:
-                _user_auth_cache.pop(token, None)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # ── Check password reset marker for cached user ──
-        try:
-            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
-            r = get_redis()
-            if r and is_redis_available():
-                pw_changed_ts = r.get(f"user_pw_changed:{cached_user_id}")
-                if pw_changed_ts:
-                    with _user_auth_cache_lock:
-                        _user_auth_cache.pop(token, None)
-                    cached_user_id = None
-        except Exception:
-            pass
-
-    if cached_user_id is not None:
-        user_repo = UserRepository(db)
-        user = user_repo.get_by_id(cached_user_id)
-        if user and user.is_active:
-            return user
-        with _user_auth_cache_lock:
-            _user_auth_cache.pop(token, None)
-
-
     try:
-        # ── Check token blacklist (invalidated on logout) ──────────────
-        from app.infrastructure.cache.token_blacklist import is_token_blacklisted
+        # 1. Cryptographic verification of JWT (signature, expiry) on EVERY request
+        payload = verify_access_token(token)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
 
+        # 2. Check token blacklist (invalidated on logout)
+        from app.infrastructure.cache.token_blacklist import is_token_blacklisted
         if is_token_blacklisted(token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -148,30 +106,12 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # ── Decode and verify JWT ──────────────────────────────────────
-        payload = verify_access_token(token)
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-
-        # ── Load user from database ────────────────────────────────────
-        user_repo = UserRepository(db)
-        user = user_repo.get_by_id(user_id)
-        if user is None:
-            raise credentials_exception
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account is disabled",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # ── Check if token was issued before a password reset ──────────
+        # 3. Check password reset marker (invalidates tokens issued before password change)
         try:
             from app.infrastructure.cache.redis_client import get_redis, is_redis_available
             r = get_redis()
             if r and is_redis_available():
-                pw_changed_ts = r.get(f"user_pw_changed:{user.id}")
+                pw_changed_ts = r.get(f"user_pw_changed:{user_id}")
                 if pw_changed_ts:
                     token_iat = payload.get("iat", 0)
                     if token_iat < int(pw_changed_ts):
@@ -183,15 +123,23 @@ def get_current_user(
         except HTTPException:
             raise
         except Exception:
-            pass  # Redis unavailable — skip check, don't break auth
+            pass  # Redis unavailable — don't break auth
 
-        # Populate L1 cache with validated user_id (30s TTL)
-        with _user_auth_cache_lock:
-            if len(_user_auth_cache) < 5000:
-                _user_auth_cache[token] = (now + 30.0, user.id)
+        # 4. Load User attached to the current request's active DB session
+        uid_int = int(user_id)
+        user_repo = UserRepository(db)
+        user = user_repo.get_by_id(uid_int)
+        if user is None:
+            raise credentials_exception
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account is disabled",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         return user
-
 
     except HTTPException:
         raise
@@ -201,8 +149,14 @@ def get_current_user(
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except Exception:
-
+    except SQLAlchemyError as se:
+        logger.error("Database connection error in get_current_user: %s", str(se))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service temporarily unavailable",
+        )
+    except Exception as e:
+        logger.error("Unexpected error in get_current_user: %s", str(e))
         raise credentials_exception
 
 
