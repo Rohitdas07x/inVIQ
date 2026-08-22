@@ -58,11 +58,9 @@ from app.api.schemas.auth_schemas import (
 
 
 import secrets
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import hashlib
 import jwt
+from app.infrastructure.email import smtp_client
 
 logger = logging.getLogger("smart_inventory.auth")
 
@@ -105,38 +103,12 @@ def _generate_password_reset_token(user_id: int, email: str) -> str:
 
 
 def _send_email(to_email: str, subject: str, html_content: str) -> bool:
-    """Send email via SMTP. Returns True if successful."""
-    if not settings.SMTP_ENABLED:
-        logger.info("SMTP disabled - email not sent (to: %s)", mask_email(to_email))
-        return False
-
-    if not settings.SMTP_HOST or not settings.SMTP_USER:
-        logger.warning("SMTP not configured - email not sent")
-        return False
-
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = (
-            f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL or settings.SMTP_USER}>"
-        )
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.attach(MIMEText(html_content, "html"))
-
-        # 30-second timeout prevents hanging on slow/unresponsive SMTP servers
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as server:
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(
-                settings.SMTP_FROM_EMAIL or settings.SMTP_USER,
-                to_email,
-                msg.as_string(),
-            )
-        logger.info("Email sent successfully to %s", mask_email(to_email))
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send email to {mask_email(to_email)}: {e}")
-        return False
+    """Send email via SMTP infrastructure client. Returns True if successful."""
+    return smtp_client.send_email(
+        to_email=to_email,
+        subject=subject,
+        html_content=html_content,
+    )
 
 
 def _send_verification_email(user: User, request: Request) -> bool:

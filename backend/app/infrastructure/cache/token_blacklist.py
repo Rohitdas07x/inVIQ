@@ -43,6 +43,11 @@ def blacklist_token(token: str, expires_in_minutes: int = None) -> None:
     if expires_in_minutes is None:
         expires_in_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
+    # Always record in local memory store as well for instant local consistency
+    _purge_expired_memory_tokens()
+    expiry_epoch = time.time() + (expires_in_minutes * 60)
+    _memory_blacklist[token] = expiry_epoch
+
     r = get_redis()
     if r and is_redis_available():
         try:
@@ -56,18 +61,20 @@ def blacklist_token(token: str, expires_in_minutes: int = None) -> None:
         except Exception as e:
             logger.warning("Redis blacklist write failed: %s", e)
 
-    # Fallback to in-memory
+    # Log warning if Redis is unavailable
     logger.warning(
         "⚠️ SECURITY WARNING: Redis is unavailable. Blacklisting token in process-local memory only. "
         "Revocation will not synchronize across other worker processes."
     )
-    _purge_expired_memory_tokens()
-    expiry_epoch = time.time() + (expires_in_minutes * 60)
-    _memory_blacklist[token] = expiry_epoch
 
 
 def is_token_blacklisted(token: str) -> bool:
     """Check if a JWT has been blacklisted (logged out)."""
+    # Check local memory first for sub-microsecond lookup
+    _purge_expired_memory_tokens()
+    if token in _memory_blacklist:
+        return True
+
     r = get_redis()
     if r and is_redis_available():
         try:
@@ -75,9 +82,7 @@ def is_token_blacklisted(token: str) -> bool:
         except Exception as e:
             logger.warning("Redis blacklist read failed: %s", e)
 
-    # Fallback to in-memory
-    _purge_expired_memory_tokens()
-    return token in _memory_blacklist
+    return False
 
 
 def blacklist_refresh_token(token: str) -> None:
