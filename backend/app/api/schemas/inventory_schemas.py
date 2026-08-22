@@ -55,18 +55,51 @@ class UpdateLocationRequest(BaseModel):
 
 
 
+class ItemPackagingSchema(BaseModel):
+    id: Optional[int] = None
+    item_id: Optional[int] = None
+    unit_name: str = Field(min_length=1, max_length=50, description="Packaging name, e.g. strip, box, carton")
+    multiplier: int = Field(default=1, ge=1, description="Base units in this package (e.g. 10 tabs/strip, 100 tabs/box)")
+    barcode: Optional[str] = Field(default=None, max_length=50, description="Package-specific EAN/UPC barcode")
+    mrp: Optional[float] = Field(default=None, ge=0.0, description="Package MRP (if None, calculated from base MRP)")
+    purchase_rate: Optional[float] = Field(default=None, ge=0.0, description="Package purchase rate from distributor")
+    is_default_dispense: bool = False
+    is_default_purchase: bool = False
+
+
+class CreateItemPackagingRequest(BaseModel):
+    unit_name: str = Field(min_length=1, max_length=50)
+    multiplier: int = Field(default=1, ge=1)
+    barcode: Optional[str] = Field(default=None, max_length=50)
+    mrp: Optional[float] = Field(default=None, ge=0.0)
+    purchase_rate: Optional[float] = Field(default=None, ge=0.0)
+    is_default_dispense: bool = False
+    is_default_purchase: bool = False
+
+
+class UpdateItemPackagingRequest(BaseModel):
+    unit_name: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    multiplier: Optional[int] = Field(default=None, ge=1)
+    barcode: Optional[str] = Field(default=None, max_length=50)
+    mrp: Optional[float] = Field(default=None, ge=0.0)
+    purchase_rate: Optional[float] = Field(default=None, ge=0.0)
+    is_default_dispense: Optional[bool] = None
+    is_default_purchase: Optional[bool] = None
+
+
 class CreateItemRequest(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     category: str = Field(min_length=2, max_length=100)
-    unit: str = Field(min_length=1, max_length=50)
+    unit: str = Field(min_length=1, max_length=50, description="Base indivisible atomic unit, e.g. tablet, capsule, ml, vial")
     barcode: Optional[str] = Field(default=None, max_length=50, description="Barcode or EAN-13")
     strength: Optional[str] = Field(default=None, max_length=50, description="Dosage strength, e.g. 500mg, 10ml")
-    mrp: Optional[float] = Field(default=0.0, ge=0.0, description="Maximum Retail Price (MRP)")
-    purchase_rate: Optional[float] = Field(default=0.0, ge=0.0, description="Purchase rate from distributor")
+    mrp: Optional[float] = Field(default=0.0, ge=0.0, description="Maximum Retail Price (MRP) per base unit")
+    purchase_rate: Optional[float] = Field(default=0.0, ge=0.0, description="Purchase rate per base unit")
     lead_time_days: int = Field(default=2, ge=1, le=365)
-    min_stock: int = Field(default=10, ge=0)
+    min_stock: int = Field(default=10, ge=0, description="Safety threshold in base units")
     # Product-level pharmacy field (all units of this product share the same storage requirement)
     storage_temp: Optional[str] = Field(default="ambient", pattern="^(ambient|cold_chain)$", description="Storage temperature requirement")
+    packagings: Optional[List[CreateItemPackagingRequest]] = Field(default=None, description="Initial packaging tiers (e.g. strip, box)")
 
 
 class UpdateItemRequest(BaseModel):
@@ -86,10 +119,11 @@ class ResetDataRequest(BaseModel):
     confirm: bool = False
 
 
-
 class ScanDispenseRequest(BaseModel):
-    barcode: str = Field(min_length=1, max_length=100, description="Medicine barcode, EAN-13, or numeric item ID")
+    barcode: str = Field(min_length=1, max_length=100, description="Medicine barcode, package barcode, EAN-13, or numeric item ID")
     location_id: int = Field(gt=0, description="Counter / Branch location ID")
-    quantity: int = Field(default=1, gt=0, description="Number of units/strips to dispense")
+    quantity: int = Field(default=1, gt=0, description="Number of packages or base units to dispense")
+    unit: Optional[str] = Field(default=None, description="Packaging unit to dispense (e.g. strip, box, tablet)")
     notes: Optional[str] = None
+
 
