@@ -138,6 +138,37 @@ class Item(Base):
 
     organization = relationship("Organization", back_populates="items")
     transactions = relationship("InventoryTransaction", back_populates="item")
+    packagings = relationship("ItemPackaging", back_populates="item", cascade="all, delete-orphan")
+
+
+class ItemPackaging(Base):
+    """
+    Defines a packaging tier above the base unit (e.g. strip, box, carton, bottle).
+    Maps external package barcodes, package multipliers, and custom package pricing.
+    """
+    __tablename__ = "item_packagings"
+    __table_args__ = (
+        Index("ix_item_packagings_item", "item_id"),
+        Index("ix_item_packagings_barcode_org", "barcode", "org_id"),
+        Index("ix_item_packagings_org_unit", "org_id", "unit_name"),
+        Index("ix_item_packagings_item_multiplier", "item_id", "multiplier"),
+    )
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    item_id             = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    org_id              = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    unit_name           = Column(String(50), nullable=False)  # e.g. "strip", "box", "carton", "bottle"
+    multiplier          = Column(Integer, nullable=False, default=1)  # number of base units per package (e.g. 10 tabs/strip, 100 tabs/box)
+    barcode             = Column(String(50), nullable=True, index=True)  # package-specific EAN/UPC barcode
+    mrp                 = Column(Float, nullable=True)  # package retail price (if null, calculated as multiplier * item.mrp)
+    purchase_rate       = Column(Float, nullable=True)  # package distributor purchase rate
+    is_default_dispense = Column(Boolean, default=False)  # preselected for retail counter sales
+    is_default_purchase = Column(Boolean, default=False)  # preselected for vendor receiving
+    created_at          = Column(TIMESTAMP, server_default=func.now())
+    updated_at          = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    item         = relationship("Item", back_populates="packagings")
+    organization = relationship("Organization")
 
 
 
@@ -166,10 +197,16 @@ class InventoryTransaction(Base):
     batch_number = Column(String(50), nullable=True, index=True)   # e.g. "BT-25-4821"
     expiry_date = Column(Date, nullable=True, index=True)           # expiry of this batch
 
+    # ── Unit of Measure (UOM) context fields ──────────────────────────────
+    transacted_unit = Column(String(50), nullable=True)  # e.g. "strip", "box", "tablet"
+    transacted_qty  = Column(Integer, nullable=True)     # e.g. 2 (boxes)
+    multiplier      = Column(Integer, nullable=True, default=1)  # e.g. 100
+
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     location = relationship("Location", back_populates="transactions")
     item = relationship("Item", back_populates="transactions")
+
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────
@@ -248,6 +285,13 @@ class RequisitionItem(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
     quantity_requested = Column(Integer, nullable=False)
     quantity_approved = Column(Integer, nullable=True)
+
+    # ── Unit of Measure (UOM) fields ──────────────────────────────────────
+    packaging_unit          = Column(String(50), nullable=True)  # e.g. "strip", "box", "tablet"
+    multiplier              = Column(Integer, nullable=False, default=1)  # base units per package
+    base_quantity_requested = Column(Integer, nullable=True)  # total base units requested
+    base_quantity_approved  = Column(Integer, nullable=True)  # total base units approved
+
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -381,3 +425,57 @@ class ImportQuarantineRow(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     job = relationship("DataImportJob", back_populates="quarantine_rows")
+
+
+# ── Billing Sessions ──────────────────────────────────────────────────────
+
+class BillingSession(Base):
+    """
+    Groups barcode scans into a single customer cart at the pharmacy counter.
+
+    Lifecycle: OPEN → CLOSED (on checkout) | CANCELLED (on void).
+
+    The `items` JSON column stores a point-in-time snapshot of every line sold
+    so that monthly financial reports remain accurate even if item MRP changes
+    after the sale.
+    """
+    __tablename__ = "billing_sessions"
+    __table_args__ = (
+        Index("ix_billing_sessions_org_status", "org_id", "status"),
+        Index("ix_billing_sessions_org_month", "org_id", "month_key"),
+        Index("ix_billing_sessions_location_opened", "location_id", "opened_at"),
+        Index("ix_billing_sessions_cashier_opened", "cashier_id", "opened_at"),
+    )
+
+    id             = Column(Integer, primary_key=True, index=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    location_id    = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
+    cashier_id     = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # OPEN | CLOSED | CANCELLED
+    status         = Column(String(20), nullable=False, default="OPEN", index=True)
+
+    # Snapshot of items sold — list of dicts:
+    # [{ item_id, item_name, barcode, mrp, qty, purchase_rate,
+    #    batch_number, transaction_id, line_total }, ...]
+    items          = Column(JSON, nullable=False, default=list)
+
+    # Financial breakdown — populated at checkout
+    gross_total      = Column(Float, nullable=True)       # Σ (qty × mrp)
+    discount_model   = Column(String(20), nullable=True)  # flat | tiered | none
+    discount_pct     = Column(Float, nullable=True, default=0.0)
+    discount_amount  = Column(Float, nullable=True, default=0.0)
+    net_total        = Column(Float, nullable=True)       # gross_total - discount_amount
+    purchase_cost    = Column(Float, nullable=True)       # Σ (qty × purchase_rate) — for profit calc
+
+    # Timestamps
+    opened_at      = Column(TIMESTAMP, server_default=func.now(), nullable=False, index=True)
+    closed_at      = Column(TIMESTAMP, nullable=True)
+
+    # "2026-08" — pre-computed for fast monthly aggregation queries
+    month_key      = Column(String(7), nullable=True, index=True)
+
+    # Relationships
+    organization   = relationship("Organization")
+    location       = relationship("Location")
+    cashier        = relationship("User")
