@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from langchain_core.tools import tool
-from app.infrastructure.database.queries import (
+from app.infrastructure.database.analytics_repo import (
     get_latest_stock_health,
     get_critical_alerts,
 )

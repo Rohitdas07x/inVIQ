@@ -16,7 +16,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.core.config import settings
-from app.domain.agent.prompts import get_system_prompt
+from app.application.agent_prompts import get_system_prompt
 from app.application.agent_tools import (
     get_inventory_overview,
     get_critical_items,
