@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from typing import Optional
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
 
 from app.core.rate_limiter import limiter
@@ -639,10 +639,11 @@ def generate_pdf_report(
     elements = []
 
     report_titles = {
-        "inventory":    "Inventory Stock Report",
-        "transactions": "Transaction History Report",
-        "requisitions": "Requisitions Report",
-        "low_stock":    "Low Stock Alert Report",
+        "inventory":     "Inventory Stock Report",
+        "transactions":  "Transaction History Report",
+        "requisitions":  "Requisitions Report",
+        "low_stock":     "Low Stock Alert Report",
+        "monthly_sales": "Monthly Sales & Profit Report",
     }
     title = report_titles.get(report_type, "Inventory Report")
 
@@ -774,6 +775,43 @@ def generate_pdf_report(
             t.setStyle(TableStyle(HEADER_STYLE))
             elements.append(t)
 
+    # ── MONTHLY SALES REPORT ──────────────────────────────────────────────
+    elif report_type == "monthly_sales":
+        # Extract year and month from date_from (e.g. "2026-08" or "2026-08-01") or default to current
+        now = datetime.now(timezone.utc)
+        target_year = now.year
+        target_month = now.month
+        if date_from:
+            try:
+                parts = date_from.split("-")
+                target_year = int(parts[0])
+                target_month = int(parts[1])
+            except Exception:
+                pass
+
+        month_label = f"{target_year:04d}-{target_month:02d}"
+        elements.append(Paragraph(f"Monthly Financial Performance ({month_label})", styles["Heading2"]))
+
+        summary = svc.get_monthly_sales_summary(
+            org_id=caller_org_id or 1,
+            year=target_year,
+            month=target_month,
+        )
+
+        sales_data = [
+            ["Financial Metric", "Value (INR)"],
+            ["Total Customer Bills (Sessions)", str(summary.get("session_count", 0))],
+            ["Gross Sales (MRP Total)", f"Rs. {summary.get('gross_total', 0.0):,.2f}"],
+            ["Total Customer Discounts Given", f"Rs. {summary.get('discount_amount', 0.0):,.2f}"],
+            ["Net Realized Revenue", f"Rs. {summary.get('net_total', 0.0):,.2f}"],
+            ["Medication Purchase Cost (COGS)", f"Rs. {summary.get('purchase_cost', 0.0):,.2f}"],
+            ["Gross Profit", f"Rs. {summary.get('gross_profit', 0.0):,.2f}"],
+            ["Gross Profit Margin", f"{summary.get('margin_pct', 0.0):.2f}%"],
+        ]
+        st = Table(sales_data, colWidths=[3.2 * inch, 2.2 * inch])
+        st.setStyle(TableStyle(HEADER_STYLE))
+        elements.append(st)
+
     # Build PDF
     doc.build(elements)
     pdf_bytes = buffer.getvalue()
@@ -807,4 +845,169 @@ def generate_pdf_report(
         media_type="application/pdf",
         headers=response_headers,
     )
+
+
+# ── Discount Settings ─────────────────────────────────────────────────────────
+
+
+class TieredSlab(BaseModel):
+    min_bill:     float = Field(ge=0, description="Minimum bill total for this slab (₹)")
+    max_bill:     Optional[float] = Field(default=None, description="Maximum bill total (₹); null = no ceiling")
+    discount_pct: float = Field(ge=0.0, le=100.0, description="Discount percentage for this slab")
+
+
+class DiscountSettingsRequest(BaseModel):
+    discount_model:         Literal["flat", "tiered", "none"]
+    flat_discount_pct:      float = Field(default=0.0, ge=0.0, le=100.0)
+    tiered_discount_config: Optional[List[TieredSlab]] = None
+    manual_discount_cap_pct: float = Field(default=20.0, ge=0.0, le=100.0)
+
+
+@router.get("/discount-settings", response_model=dict)
+def get_discount_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Return the current discount policy for this organisation."""
+    if current_user.org_id is None:
+        raise AuthorizationError("User is not assigned to an organisation")
+    org = db.query(Organization).filter(Organization.id == current_user.org_id).first()
+    if not org:
+        raise NotFoundError("Organisation", current_user.org_id)
+
+    settings = org.settings or {}
+    return {
+        "success": True,
+        "data": {
+            "discount_model":          settings.get("discount_model", "none"),
+            "flat_discount_pct":       settings.get("flat_discount_pct", 0.0),
+            "tiered_discount_config":  settings.get("tiered_discount_config", []),
+            "manual_discount_cap_pct": settings.get("manual_discount_cap_pct", 20.0),
+        },
+    }
+
+
+@router.put("/discount-settings", response_model=dict)
+def update_discount_settings(
+    body: DiscountSettingsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Save discount policy into org.settings.
+    Validates tiered slabs before persisting.
+    """
+    if current_user.org_id is None:
+        raise AuthorizationError("User is not assigned to an organisation")
+    org = db.query(Organization).filter(Organization.id == current_user.org_id).first()
+    if not org:
+        raise NotFoundError("Organisation", current_user.org_id)
+
+    # Build the config dict from the request
+    config: dict = {
+        "discount_model":          body.discount_model,
+        "flat_discount_pct":       body.flat_discount_pct,
+        "manual_discount_cap_pct": body.manual_discount_cap_pct,
+        "tiered_discount_config":  [
+            {
+                "min_bill":     s.min_bill,
+                "max_bill":     s.max_bill,
+                "discount_pct": s.discount_pct,
+            }
+            for s in (body.tiered_discount_config or [])
+        ],
+    }
+
+    # Validate using the discount service
+    from app.application.discount_service import validate_discount_config
+    errors = validate_discount_config(config)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    # Merge into org.settings (preserves other settings keys)
+    merged = dict(org.settings or {})
+    merged.update(config)
+    org.settings = merged
+    db.commit()
+
+    logger.info(
+        "Discount settings updated | org=%s model=%s",
+        current_user.org_id, body.discount_model,
+    )
+    return {
+        "success": True,
+        "message": "Discount policy saved successfully",
+        "data": config,
+    }
+
+
+# ── Monthly Sales & Profit Report ─────────────────────────────────────────────
+
+
+@router.get("/reports/monthly-sales", response_model=dict)
+def get_monthly_sales_report(
+    year:  int = Query(..., ge=2020, le=2100, description="Calendar year, e.g. 2026"),
+    month: int = Query(..., ge=1,    le=12,   description="Calendar month 1–12"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Monthly Sales & Profit summary for the selected calendar month.
+
+    Reads from Redis monthly sales cache (fast path).
+    Falls back to DB aggregate on billing_sessions when Redis is cold/empty.
+    Report includes: gross sales, discounts given, net revenue, purchase cost,
+    gross profit, and margin percentage.
+    """
+    if current_user.org_id is None:
+        raise AuthorizationError("User is not assigned to an organisation")
+
+    org_id    = current_user.org_id
+    month_key = f"{year:04d}-{month:02d}"
+
+    # ── 1. Try Redis cache (fast path) ──────────────────────────────────
+    summary = None
+    try:
+        from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+        r = get_redis()
+        if r and is_redis_available():
+            import json
+            raw = r.hgetall(f"sales:{org_id}:{month_key}")
+            if raw:
+                summary = {
+                    "month":           month_key,
+                    "session_count":   int(raw.get(b"session_count", 0) or raw.get("session_count", 0)),
+                    "gross_total":     float(raw.get(b"gross_total",    0) or raw.get("gross_total",    0)),
+                    "discount_amount": float(raw.get(b"discount_amount",0) or raw.get("discount_amount",0)),
+                    "net_total":       float(raw.get(b"net_total",      0) or raw.get("net_total",      0)),
+                    "purchase_cost":   float(raw.get(b"purchase_cost",  0) or raw.get("purchase_cost",  0)),
+                }
+                net    = summary["net_total"]
+                cost   = summary["purchase_cost"]
+                profit = round(net - cost, 2)
+                summary["gross_profit"] = profit
+                summary["margin_pct"]   = round((profit / net * 100) if net > 0 else 0.0, 2)
+    except Exception as e:
+        logger.warning("Redis monthly sales cache read failed: %s", e)
+
+    # ── 2. DB fallback ──────────────────────────────────────────────────
+    if summary is None:
+        try:
+            from app.infrastructure.database.billing_repo import BillingRepository
+            billing_repo = BillingRepository(db)
+            summary = billing_repo.get_monthly_aggregate(org_id=org_id, year=year, month=month)
+        except Exception as e:
+            logger.error("Monthly sales DB aggregate failed: %s", e)
+            summary = {
+                "month":           month_key,
+                "session_count":   0,
+                "gross_total":     0.0,
+                "discount_amount": 0.0,
+                "net_total":       0.0,
+                "purchase_cost":   0.0,
+                "gross_profit":    0.0,
+                "margin_pct":      0.0,
+            }
+
+    return {"success": True, "data": summary}
 

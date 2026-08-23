@@ -229,6 +229,47 @@ class ReportService:
             "rejected": sum(1 for r in rows if r["status"] == "REJECTED"),
         }
 
+    def get_monthly_sales_summary(
+        self,
+        org_id: int,
+        year: int,
+        month: int,
+    ) -> Dict[str, Any]:
+        """
+        Return Monthly Sales & Profit summary for a specific calendar month.
+        Reads from Redis monthly cache with fallback to DB BillingSession aggregate.
+        """
+        month_key = f"{year:04d}-{month:02d}"
+        summary = None
+        try:
+            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+            r = get_redis()
+            if r and is_redis_available():
+                raw = r.hgetall(f"sales:{org_id}:{month_key}")
+                if raw:
+                    summary = {
+                        "month":           month_key,
+                        "session_count":   int(raw.get(b"session_count", 0) or raw.get("session_count", 0)),
+                        "gross_total":     float(raw.get(b"gross_total",    0) or raw.get("gross_total",    0)),
+                        "discount_amount": float(raw.get(b"discount_amount",0) or raw.get("discount_amount",0)),
+                        "net_total":       float(raw.get(b"net_total",      0) or raw.get("net_total",      0)),
+                        "purchase_cost":   float(raw.get(b"purchase_cost",  0) or raw.get("purchase_cost",  0)),
+                    }
+                    net    = summary["net_total"]
+                    cost   = summary["purchase_cost"]
+                    profit = round(net - cost, 2)
+                    summary["gross_profit"] = profit
+                    summary["margin_pct"]   = round((profit / net * 100) if net > 0 else 0.0, 2)
+        except Exception as e:
+            logger.warning("Redis monthly sales cache read failed in ReportService: %s", e)
+
+        if summary is None:
+            from app.infrastructure.database.billing_repo import BillingRepository
+            repo = BillingRepository(self._db)
+            summary = repo.get_monthly_aggregate(org_id=org_id, year=year, month=month)
+
+        return summary
+
 
 
 # ---------------------------------------------------------------------------
