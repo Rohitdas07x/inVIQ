@@ -4,7 +4,7 @@ Strawberry GraphQL resolvers for the InvIQ analytics layer.
 Design decisions
 ─────────────────
 * All resolvers delegate to the **existing** AnalyticsService / cache_service /
-  queries.py — no new database logic lives here.
+  analytics_repo.py — no new database logic lives here.
 * Redis caching reuses the same cache keys as the REST endpoints so a warm
   cache is shared between REST and GraphQL callers.
 * Role-aware field masking:
@@ -31,7 +31,7 @@ from app.application.cache_service import (
     DASHBOARD_TTL,
 )
 from app.core.security import ROLE_HIERARCHY
-from app.infrastructure.database.queries import get_latest_stock_health
+from app.infrastructure.database.analytics_repo import get_latest_stock_health
 
 from app.api.graphql.types import (
     AlertItem,

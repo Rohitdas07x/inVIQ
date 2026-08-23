@@ -7,8 +7,7 @@ the rest of the application's error handling pattern.
 
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
-from app.infrastructure.database.queries import (
-
+from app.infrastructure.database.analytics_repo import (
     get_latest_stock_health,
     get_critical_alerts,
     get_heatmap_data,
