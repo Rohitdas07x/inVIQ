@@ -81,8 +81,14 @@ class VendorService:
                     col_map["item_name"] = i
                 elif "quantity" in h or "received" in h or "qty" in h:
                     col_map["quantity"] = i
-                elif "price" in h or "cost" in h or "rate" in h or "unit" in h and "price" in h:
+                elif "price" in h or "cost" in h or "rate" in h or ("unit" in h and "price" in h):
                     col_map["price"] = i
+                elif "unit" in h or "packaging" in h or "uom" in h:
+                    col_map["unit"] = i
+                elif "batch" in h or "lot" in h:
+                    col_map["batch"] = i
+                elif "expir" in h or "exp" in h:
+                    col_map["expiry"] = i
                 elif "date" in h:
                     col_map["date"] = i
                 elif "note" in h:
@@ -123,6 +129,21 @@ class VendorService:
                         str(row[col_map.get("notes", -1)]).strip()
                         if col_map.get("notes") is not None and col_map.get("notes") < len(row) and row[col_map.get("notes")]
                         else ""
+                    )
+                    unit = (
+                        str(row[col_map.get("unit", -1)]).strip()
+                        if col_map.get("unit") is not None and col_map.get("unit") < len(row) and row[col_map.get("unit")]
+                        else None
+                    )
+                    batch_number = (
+                        str(row[col_map.get("batch", -1)]).strip()
+                        if col_map.get("batch") is not None and col_map.get("batch") < len(row) and row[col_map.get("batch")]
+                        else None
+                    )
+                    expiry_date = (
+                        row[col_map.get("expiry", -1)]
+                        if col_map.get("expiry") is not None and col_map.get("expiry") < len(row)
+                        else None
                     )
 
                     # Optional price per item
@@ -168,22 +189,35 @@ class VendorService:
                             except ValueError:
                                 pass  # Use today
 
-                    # In-memory closing stock tracking (O(1) — 0 DB roundtrips)
+                    # Resolve packaging tier & multiplier
+                    from app.application.uom_service import resolve_item_packaging
+                    pkg_res = resolve_item_packaging(matched_item, unit_name_or_barcode=unit)
+                    multiplier = max(1, int(pkg_res.get("multiplier", 1)))
+                    resolved_unit = pkg_res.get("unit_name", getattr(matched_item, "unit", "Units") or "Units")
+
+                    base_qty_received = qty * multiplier
+
+                    # In-memory closing stock tracking in base units (O(1) — 0 DB roundtrips)
                     opening_stock = location_stocks.get(matched_item.id, 0)
-                    closing_stock = opening_stock + qty
+                    closing_stock = opening_stock + base_qty_received
                     location_stocks[matched_item.id] = closing_stock
 
-                    # Create transaction (flush only — commit at end)
+                    # Create transaction in base units with packaging context (flush only — commit at end)
                     self.inv_repo.create_transaction(
                         location_id=location_id,
                         item_id=matched_item.id,
                         date=tx_date,
                         opening_stock=opening_stock,
-                        received=qty,
+                        received=base_qty_received,
                         issued=0,
                         closing_stock=closing_stock,
-                        notes=f"Vendor delivery: {notes}" if notes else f"Vendor delivery from {filename}",
+                        notes=f"Vendor delivery: {qty} {resolved_unit} ({notes or filename})",
                         entered_by=f"vendor/upload/{vendor_user_id}",
+                        batch_number=batch_number if batch_number else None,
+                        expiry_date=expiry_date if expiry_date else None,
+                        transacted_unit=resolved_unit,
+                        transacted_qty=qty,
+                        multiplier=multiplier,
                         flush_only=True,
                     )
 
@@ -193,9 +227,13 @@ class VendorService:
                         "item_id": matched_item.id,
                         "item_name": matched_item.name,
                         "quantity": qty,
-                        "unit": matched_item.unit or "Units",
+                        "unit": resolved_unit,
+                        "multiplier": multiplier,
+                        "base_quantity": base_qty_received,
                         "unit_price": unit_price,
                         "total": line_total,
+                        "batch_number": batch_number if batch_number else None,
+                        "expiry_date": str(expiry_date) if expiry_date else None,
                     })
 
                 except Exception as e:
