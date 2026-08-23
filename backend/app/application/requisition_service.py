@@ -57,14 +57,22 @@ class RequisitionService:
 
         if req.items:
             for ri in req.items:
+                base_unit = ri.item.unit if ri.item else "units"
+                pkg_unit = ri.packaging_unit or base_unit
+                mult = ri.multiplier or 1
                 result["items"].append(
                     {
                         "id": ri.id,
                         "item_id": ri.item_id,
                         "item_name": ri.item.name if ri.item else None,
-                        "item_unit": ri.item.unit if ri.item else None,
+                        "item_unit": base_unit,
+                        "base_unit": base_unit,
+                        "packaging_unit": pkg_unit,
+                        "multiplier": mult,
                         "quantity_requested": ri.quantity_requested,
+                        "base_quantity_requested": ri.base_quantity_requested or (ri.quantity_requested * mult),
                         "quantity_approved": ri.quantity_approved,
+                        "base_quantity_approved": ri.base_quantity_approved,
                         "notes": ri.notes,
                     }
                 )
@@ -82,6 +90,8 @@ class RequisitionService:
         org_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         from app.core.exceptions import AuthorizationError, DuplicateError
+        from app.application.uom_service import resolve_item_packaging
+
         try:
             location = self.repo.get_location(location_id)
             if not location:
@@ -96,6 +106,7 @@ class RequisitionService:
                     f"Invalid urgency level: {urgency}. Must be LOW, NORMAL, HIGH, or EMERGENCY"
                 )
 
+            validated_items = []
             for item_data in items:
                 item = self.repo.get_item(item_data["item_id"])
                 if not item:
@@ -107,10 +118,27 @@ class RequisitionService:
                         f"Item '{item.name}' does not belong to your organization"
                     )
 
-                if item_data.get("quantity", 0) <= 0:
+                qty = int(item_data.get("quantity", 0))
+                if qty <= 0:
                     raise ValidationError(
                         f"Quantity must be positive for item {item.name}"
                     )
+
+                # Resolve packaging unit & multiplier
+                requested_unit = item_data.get("packaging_unit") or item_data.get("unit")
+                pkg_res = resolve_item_packaging(item, unit_name_or_barcode=requested_unit)
+                mult = max(1, int(pkg_res.get("multiplier", 1)))
+                pkg_name = pkg_res.get("unit_name", item.unit)
+                base_qty = qty * mult
+
+                validated_items.append({
+                    "item_id": item.id,
+                    "quantity": qty,
+                    "packaging_unit": pkg_name,
+                    "multiplier": mult,
+                    "base_quantity": base_qty,
+                    "notes": item_data.get("notes"),
+                })
 
             # Collision-resilient creation loop under simultaneous concurrent requests
             max_attempts = 5
@@ -127,12 +155,15 @@ class RequisitionService:
                         notes=notes,
                     )
 
-                    for item_data in items:
+                    for vi in validated_items:
                         self.repo.add_item(
                             requisition_id=requisition.id,
-                            item_id=item_data["item_id"],
-                            quantity_requested=item_data["quantity"],
-                            notes=item_data.get("notes"),
+                            item_id=vi["item_id"],
+                            quantity_requested=vi["quantity"],
+                            packaging_unit=vi["packaging_unit"],
+                            multiplier=vi["multiplier"],
+                            base_quantity_requested=vi["base_quantity"],
+                            notes=vi["notes"],
                         )
 
                     self.repo.commit()
@@ -214,17 +245,27 @@ class RequisitionService:
                     req_item.item_id, req_item.quantity_requested
                 )
                 req_item.quantity_approved = approved_qty
+                
+                raw_mult = getattr(req_item, "multiplier", 1)
+                try:
+                    mult_val = int(raw_mult) if raw_mult is not None else 1
+                except (TypeError, ValueError):
+                    mult_val = 1
+                multiplier = max(1, mult_val)
+                base_approved = approved_qty * multiplier
+                req_item.base_quantity_approved = base_approved
 
                 latest = self.inv_repo.get_latest_transaction(
                     requisition.location_id, req_item.item_id
                 )
                 current_stock = latest.closing_stock if latest else 0
 
-                if approved_qty > current_stock:
+                if base_approved > current_stock:
                     item = self.repo.get_item(req_item.item_id)
                     item_label = item.name if item else f"item_id={req_item.item_id}"
+                    pkg_label = req_item.packaging_unit or "units"
                     stock_errors.append(
-                        f"{item_label}: requested {approved_qty}, available {current_stock}"
+                        f"{item_label}: requested {approved_qty} {pkg_label} ({base_approved} base units), available {current_stock}"
                     )
 
             if stock_errors:
@@ -240,14 +281,24 @@ class RequisitionService:
             # ── Atomic batch: flush each deduction, commit once at the end ──
             for req_item in requisition.items:
                 if req_item.quantity_approved and req_item.quantity_approved > 0:
+                    raw_mult = getattr(req_item, "multiplier", 1)
+                    try:
+                        mult_val = int(raw_mult) if raw_mult is not None else 1
+                    except (TypeError, ValueError):
+                        mult_val = 1
+                    multiplier = max(1, mult_val)
+                    base_deduct = req_item.quantity_approved * multiplier
                     result = inv_service.add_transaction(
                         location_id=requisition.location_id,
                         item_id=req_item.item_id,
                         transaction_date=today,
                         received=0,
-                        issued=req_item.quantity_approved,
-                        notes=f"Stock OUT: {requisition.requisition_number} ({requisition.department})",
+                        issued=base_deduct,
+                        notes=f"Stock OUT: {requisition.requisition_number} ({requisition.department}) - {req_item.quantity_approved} {req_item.packaging_unit or 'units'}",
                         entered_by=f"system/approved-by-{approved_by}",
+                        transacted_unit=getattr(req_item, "packaging_unit", None) or "units",
+                        transacted_qty=req_item.quantity_approved,
+                        multiplier=multiplier,
                         flush_only=True,  # Don't commit individual items
                     )
                     if not result["success"]:
