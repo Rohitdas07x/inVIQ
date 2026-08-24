@@ -15,7 +15,9 @@ import {
     Mail,
     FileBadge,
     FileCheck2,
-    Power
+    Power,
+    Percent,
+    Tag
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGuest } from '../../context/GuestContext';
@@ -63,6 +65,19 @@ export default function OrganizationSettings() {
     const [deleteCandidate, setDeleteCandidate] = useState(null);
     const [deleting, setDeleting] = useState(false);
 
+    // Discount policy state
+    const [discountModel, setDiscountModel] = useState('none');
+    const [flatPct, setFlatPct] = useState('');
+    const [tieredSlabs, setTieredSlabs] = useState([
+        { min_bill: 0,    max_bill: 499,  discount_pct: 0  },
+        { min_bill: 500,  max_bill: 1999, discount_pct: 5  },
+        { min_bill: 2000, max_bill: 9999, discount_pct: 10 },
+        { min_bill: 10000, max_bill: null, discount_pct: 15 },
+    ]);
+    const [discountSaving, setDiscountSaving] = useState(false);
+    const [discountMsg, setDiscountMsg] = useState(null);
+    const [discountErr, setDiscountErr] = useState(null);
+
     const fetchOrgData = async () => {
         setLoading(true);
         setError(null);
@@ -90,6 +105,13 @@ export default function OrganizationSettings() {
                         total_branches: json.data.total_branches || 0,
                         active_branches: json.data.active_branches || 0,
                     });
+                    // Hydrate discount state from org.settings
+                    const s = json.data.settings || {};
+                    setDiscountModel(s.discount_model || 'none');
+                    setFlatPct(s.flat_discount_pct != null ? String(s.flat_discount_pct) : '');
+                    if (s.tiered_discount_config && s.tiered_discount_config.length > 0) {
+                        setTieredSlabs(s.tiered_discount_config);
+                    }
                 }
             } else if (res.status === 401 || res.status === 403) {
                 if (isGuest) {
@@ -302,6 +324,56 @@ export default function OrganizationSettings() {
         }
     };
 
+    // ── Discount helpers ──────────────────────────────────────────────────
+    const handleSaveDiscount = async () => {
+        if (isGuest) { showAuthModal('Sign in to update discount settings'); return; }
+        setDiscountSaving(true);
+        setDiscountMsg(null);
+        setDiscountErr(null);
+        try {
+            const body = {
+                discount_model: discountModel,
+                flat_discount_pct: parseFloat(flatPct) || 0,
+                tiered_discount_config: tieredSlabs.map(s => ({
+                    min_bill:     parseFloat(s.min_bill)     || 0,
+                    max_bill:     s.max_bill != null && s.max_bill !== '' ? parseFloat(s.max_bill) : null,
+                    discount_pct: parseFloat(s.discount_pct) || 0,
+                })),
+                manual_discount_cap_pct: 20,
+            };
+            const res = await fetch('/api/admin/discount-settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(body),
+            });
+            const json = await res.json();
+            if (res.ok && json.success) {
+                setDiscountMsg('Discount policy saved successfully.');
+            } else {
+                const errs = json.detail?.errors || [json.detail || json.message || 'Failed to save'];
+                setDiscountErr(Array.isArray(errs) ? errs.join(' \u2022 ') : String(errs));
+            }
+        } catch (e) {
+            setDiscountErr(e.message || 'Error saving discount policy');
+        } finally {
+            setDiscountSaving(false);
+        }
+    };
+
+    const addSlab = () => setTieredSlabs(prev => [
+        ...prev,
+        { min_bill: '', max_bill: '', discount_pct: '' }
+    ]);
+
+    const removeSlab = (idx) => setTieredSlabs(prev => prev.filter((_, i) => i !== idx));
+
+    const updateSlab = (idx, field, val) => {
+        setTieredSlabs(prev => prev.map((s, i) =>
+            i === idx ? { ...s, [field]: val } : s
+        ));
+    };
+
     return (
         <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
             {/* Header */}
@@ -498,6 +570,140 @@ export default function OrganizationSettings() {
                                 <p className="text-[11px] text-slate-500 font-medium">Active Counters</p>
                             </div>
                         </div>
+                    </div>
+
+                    {/* ── Discount Policy Card ─────────────────────────── */}
+                    <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-4">
+                        <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                            <Tag size={17} className="text-violet-600" />
+                            <h2 className="text-base font-bold text-slate-900">Customer Discount Policy</h2>
+                        </div>
+
+                        {discountMsg && (
+                            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in">
+                                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                <span>{discountMsg}</span>
+                                <button onClick={() => setDiscountMsg(null)} className="ml-auto text-emerald-700 font-semibold">✕</button>
+                            </div>
+                        )}
+                        {discountErr && (
+                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 animate-in fade-in">
+                                <AlertCircle size={13} className="text-rose-600 shrink-0" />
+                                <span>{discountErr}</span>
+                                <button onClick={() => setDiscountErr(null)} className="ml-auto text-rose-700 font-semibold">✕</button>
+                            </div>
+                        )}
+
+                        {/* Model selector */}
+                        <div className="space-y-2">
+                            <p className="text-xs font-semibold text-slate-700">Discount Model</p>
+                            {[
+                                ['none',   'No Discount (Full MRP always)'],
+                                ['flat',   'Flat % — same % off every bill'],
+                                ['tiered', 'Tiered Slabs — % based on bill total'],
+                            ].map(([val, label]) => (
+                                <label key={val} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                    discountModel === val
+                                        ? 'border-violet-400 bg-violet-50 shadow-sm shadow-violet-100'
+                                        : 'border-slate-200 hover:border-slate-300'
+                                }`}>
+                                    <input
+                                        type="radio" name="discount_model" value={val}
+                                        checked={discountModel === val}
+                                        onChange={() => setDiscountModel(val)}
+                                        className="accent-violet-600"
+                                    />
+                                    <span className="text-xs font-medium text-slate-800">{label}</span>
+                                </label>
+                            ))}
+                        </div>
+
+                        {/* Flat model: single pct input */}
+                        {discountModel === 'flat' && (
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                                    Flat Discount Percentage
+                                </label>
+                                <div className="relative">
+                                    <Percent className="absolute left-3 top-2.5 text-violet-500" size={13} />
+                                    <input
+                                        type="number" min="0.1" max="100" step="0.5"
+                                        value={flatPct}
+                                        onChange={e => setFlatPct(e.target.value)}
+                                        placeholder="e.g. 10"
+                                        className="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900"
+                                    />
+                                </div>
+                                <p className="text-[11px] text-slate-400 mt-1.5">
+                                    Every bill gets this % off regardless of total amount.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Tiered model: slab table */}
+                        {discountModel === 'tiered' && (
+                            <div className="space-y-3">
+                                <p className="text-xs font-semibold text-slate-700">Discount Slabs</p>
+                                <div className="space-y-2">
+                                    {tieredSlabs.map((slab, idx) => (
+                                        <div key={idx} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl p-2">
+                                            <span className="text-[11px] text-slate-400 shrink-0">₹</span>
+                                            <input
+                                                type="number" placeholder="Min bill"
+                                                value={slab.min_bill ?? ''}
+                                                onChange={e => updateSlab(idx, 'min_bill', e.target.value)}
+                                                className="w-20 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                            />
+                                            <span className="text-[11px] text-slate-400">–</span>
+                                            <input
+                                                type="number" placeholder="Max (blank=∞)"
+                                                value={slab.max_bill ?? ''}
+                                                onChange={e => updateSlab(idx, 'max_bill', e.target.value === '' ? null : e.target.value)}
+                                                className="w-24 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                            />
+                                            <span className="text-[11px] text-slate-400">→</span>
+                                            <input
+                                                type="number" min="0" max="100" step="0.5" placeholder="%"
+                                                value={slab.discount_pct ?? ''}
+                                                onChange={e => updateSlab(idx, 'discount_pct', e.target.value)}
+                                                className="w-14 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                            />
+                                            <span className="text-[11px] text-slate-400">%</span>
+                                            <button
+                                                onClick={() => removeSlab(idx)}
+                                                disabled={tieredSlabs.length === 1}
+                                                className="ml-auto p-1 text-rose-400 hover:text-rose-600 transition-colors disabled:opacity-30"
+                                                title="Remove slab"
+                                            ><Trash2 size={12} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={addSlab}
+                                    className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 transition-colors"
+                                >
+                                    <Plus size={13} /> Add Slab
+                                </button>
+                                <p className="text-[11px] text-slate-400">
+                                    Leave Max blank for the highest slab (no ceiling). System checks slabs top-to-bottom.
+                                </p>
+                            </div>
+                        )}
+
+                        {discountModel === 'none' && (
+                            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
+                                No discount applied. Customers pay full MRP on every bill.
+                            </p>
+                        )}
+
+                        <button
+                            onClick={handleSaveDiscount}
+                            disabled={discountSaving}
+                            className="w-full py-2.5 px-4 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white font-semibold text-xs rounded-xl transition-all shadow-xs shadow-violet-500/20 flex items-center justify-center gap-2"
+                        >
+                            <Save size={13} />
+                            {discountSaving ? 'Saving Policy...' : 'Save Discount Policy'}
+                        </button>
                     </div>
                 </div>
 

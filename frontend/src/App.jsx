@@ -16,6 +16,7 @@ import SupplierManagement from './pages/admin/SupplierManagement';
 import AuditLogs from './pages/admin/AuditLogs';
 import Reports from './pages/admin/Reports';
 import OrganizationSettings from './pages/admin/OrganizationSettings';
+import BillingCounter from './pages/staff/BillingCounter';
 
 import StaffRequisition from './pages/staff/StaffRequisition';
 import DataEntry from './pages/vendor/DataEntry';
@@ -81,8 +82,10 @@ function AppContent() {
 
           {/* ── Staff (auth required) ─────────────────────────────── */}
           <Route element={<ProtectedRoute requiredRole="staff" />}>
-            <Route path="/staff"      element={<StaffRequisition />} />
-            <Route path="/staff/chat" element={<Chatbot />} />
+            <Route path="/staff"         element={<StaffRequisition />} />
+            <Route path="/staff/chat"    element={<Chatbot />} />
+            <Route path="/staff/billing" element={<BillingCounter />} />
+            <Route path="/billing"       element={<BillingCounter />} />
           </Route>
 
           {/*
@@ -99,6 +102,7 @@ function AppContent() {
             <Route index element={<Navigate to="/admin/dashboard" replace />} />
             {/* Guest-accessible read-only pages */}
             <Route path="dashboard"         element={<Dashboard />} />
+            <Route path="billing"           element={<BillingCounter />} />
             <Route path="inventory"         element={<Inventory />} />
             <Route path="stock-acquisition" element={<DataEntry />} />
             <Route path="chat"              element={<Chatbot />} />

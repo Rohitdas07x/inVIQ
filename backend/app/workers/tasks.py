@@ -25,7 +25,7 @@ logger = logging.getLogger("smart_inventory.workers")
 
 # ── Celery App Import with Graceful Fallback Decorator ────────────────────────
 try:
-    from app.celery_app import celery_app
+    from app.workers.celery_app import celery_app
     _celery_available = True
 except Exception:
     celery_app = None
@@ -353,3 +353,97 @@ def celery_cold_chain_check(org_id: Optional[int] = None, db=None):
         return run_cold_chain_health_check(db, org_id=org_id)
     with get_db_context() as session:
         return run_cold_chain_health_check(session, org_id=org_id)
+
+
+# ── 6. Monthly Sales Cache Updater ────────────────────────────────────────────
+
+@_task_wrapper(name="app.workers.tasks.update_monthly_sales_cache_task")
+def update_monthly_sales_cache_task(
+    session_id: int,
+    org_id: int,
+    correlation_id: Optional[str] = None,
+    db=None,
+) -> Dict[str, Any]:
+    """
+    Fires after every billing session checkout.
+
+    Reads the closed BillingSession from DB and atomically increments the
+    Redis monthly sales HASH for the org+month, so the monthly report endpoint
+    can read pre-computed totals in O(1) without a DB scan.
+
+    Redis key  : sales:{org_id}:{YYYY-MM}
+    Redis type : HASH
+    Fields     : session_count, gross_total, discount_amount, net_total, purchase_cost
+    TTL        : 13 months (keeps rolling 12 months available)
+    """
+    correlation_id = correlation_id or str(uuid.uuid4())
+    logger.info(
+        "Monthly sales cache update | session_id=%s org_id=%s correlation=%s",
+        session_id, org_id, correlation_id,
+    )
+
+    def _execute(session):
+        from app.infrastructure.database.models import BillingSession
+
+        billing = (
+            session.query(BillingSession)
+            .filter(BillingSession.id == session_id, BillingSession.org_id == org_id)
+            .first()
+        )
+        if not billing:
+            logger.error(
+                "Monthly cache update: BillingSession #%s not found for org %s",
+                session_id, org_id,
+            )
+            return {"status": "error", "message": "Session not found"}
+
+        if billing.status != "CLOSED":
+            logger.warning(
+                "Monthly cache update: BillingSession #%s is %s, expected CLOSED",
+                session_id, billing.status,
+            )
+            return {"status": "skipped", "reason": f"Session status is {billing.status}"}
+
+        month_key = billing.month_key
+        if not month_key:
+            # Derive from closed_at if month_key wasn't set
+            ts = billing.closed_at or billing.opened_at
+            month_key = ts.strftime("%Y-%m") if ts else datetime.utcnow().strftime("%Y-%m")
+
+        redis_key = f"sales:{org_id}:{month_key}"
+        thirteen_months_seconds = 13 * 30 * 24 * 3600
+
+        try:
+            from app.infrastructure.cache.redis_client import get_redis, is_redis_available
+            r = get_redis()
+            if r and is_redis_available():
+                pipe = r.pipeline()
+                pipe.hincrbyfloat(redis_key, "gross_total",     billing.gross_total     or 0.0)
+                pipe.hincrbyfloat(redis_key, "discount_amount", billing.discount_amount  or 0.0)
+                pipe.hincrbyfloat(redis_key, "net_total",       billing.net_total        or 0.0)
+                pipe.hincrbyfloat(redis_key, "purchase_cost",   billing.purchase_cost    or 0.0)
+                pipe.hincrby(redis_key,      "session_count",   1)
+                pipe.expire(redis_key, thirteen_months_seconds)
+                pipe.execute()
+                logger.info(
+                    "Monthly sales cache updated | key=%s net=%.2f",
+                    redis_key, billing.net_total or 0.0,
+                )
+                return {
+                    "status":     "success",
+                    "redis_key":  redis_key,
+                    "session_id": session_id,
+                    "org_id":     org_id,
+                    "correlation_id": correlation_id,
+                }
+            else:
+                logger.info("Redis unavailable — monthly cache skipped for session %s", session_id)
+                return {"status": "skipped", "reason": "Redis unavailable"}
+        except Exception as redis_err:
+            logger.error("Redis monthly cache update failed: %s", redis_err)
+            return {"status": "error", "message": str(redis_err)}
+
+    if db is not None:
+        return _execute(db)
+    with get_db_context() as session:
+        return _execute(session)

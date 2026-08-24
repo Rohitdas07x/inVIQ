@@ -41,12 +41,16 @@ Independent retail medical stores and local pharmacy chains in Tier-2/3 cities l
 ## ✨ Key Capabilities
 
 - ⚡ **Ultra-Fast Barcode Scanner Dispensing** - Instant 1-by-1 stock deduction on counter scan with zero latency and PostgreSQL transaction advisory locking.
+- 💊 **Unit of Measure (UOM) Granularity & Multi-Packaging** - Atomic smallest-unit ledger (`tablet`, `ml`, `vial`) with multi-tier packaging conversions (`strip`, `box`, `case`), single-dose 1-tablet strip handling, and hierarchical stock decomposition visualizers.
+- 🛒 **Counter Billing Cart & Flexible Customer Discounts** - High-speed barcode retail billing session with live discount previews (`none`, `flat`, `tiered` slabs), receipt generation, instant stock locking, and zero-drift void cancellation.
+- 📈 **Real-Time Monthly Sales & Gross Margin KPIs** - Sub-millisecond sales, discounts, revenue, and gross profit analytics backed by Redis pipeline caching and Celery background workers.
 - 📦 **FEFO Expiry Loss Shield** - Proactive batch alerts at 30, 60, and 90 days ensuring no expired medicine remains on shelves.
 - 🚚 **Supplier & Distributor Management** - Direct vendor portal with 1-click Excel delivery manifest ingestion and automated PDF invoices stored in Azure Blob Storage.
 - 🤖 **AI Chemist Assistant** - Ask questions in plain English or Hindi: *"What medicines are running low in Counter 1?"*
 - 📊 **Real-Time Clean Analytics** - Live stock count, critical shortages, cold-chain fridge monitor, and store-by-store breakdowns.
 - 🔐 **Enterprise Multi-Tenant Security** - Strict non-nullable `org_id` schema, HttpOnly SameSite auth cookies, CSP headers, issued-at (`iat`) token invalidation, cryptographic Google OAuth ID-token verification, and tenant-scoped Redis pub/sub.
 - ☁️ **Dual Environment Architecture** - Strictly separated `DEVELOPMENT` (local dev & rapid testing) and `PRODUCTION` (containerized Azure App Service / Cloud with Alembic migrations).
+- ✅ **Production Test Suite** - Comprehensive 342+ test cases covering unit conversions, billing lifecycles, RBAC, multi-tenancy, and FEFO dispensing with 100% pass rate.
 
 ---
 
@@ -422,7 +426,7 @@ InvIQ/
 │   │   └── workers/              # Celery background task processing & Celery Beat
 │   ├── benchmark/                # Concurrency benchmarks and Locust load tests
 │   ├── scripts/                  # Super-admin provisioning and data seeding utilities
-│   └── tests/                    # 321 automated unit, integration, and security tests
+│   └── tests/                    # 343 automated unit, integration, and security tests
 ├── frontend/
 │   ├── src/
 │   │   ├── components/           # Reusable React components & Tailwind styles

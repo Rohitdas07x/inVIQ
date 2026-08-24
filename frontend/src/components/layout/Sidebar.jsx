@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Package, MessageSquare, LogOut, ClipboardList,
     Users, ShieldCheck, Upload, Building2, FileText, Eye, HelpCircle, X,
-    PanelLeftClose, Truck
+    PanelLeftClose, Truck, ScanBarcode
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGuest } from '../../context/GuestContext';
@@ -22,6 +22,7 @@ const ROLE_LABELS = {
 const ALL_NAV_ITEMS = [
     // ── Admin Portal ──────────────────────────────────────────────────────
     { path: '/admin/dashboard',         label: 'Dashboard',           icon: LayoutDashboard, roles: ['super_admin', 'admin', 'guest'] },
+    { path: '/admin/billing',           label: 'Billing Counter',     icon: ScanBarcode,     roles: ['super_admin', 'admin', 'staff', 'guest'] },
     { path: '/admin/inventory',         label: 'Inventory',           icon: Package,          roles: ['super_admin', 'admin', 'guest'] },
     { path: '/admin/stock-acquisition', label: 'Stock Acquisition',   icon: Upload,           roles: ['super_admin', 'admin', 'vendor', 'guest'] },
     { path: '/admin/requisitions',      label: 'Requisitions',        icon: ClipboardList,    roles: ['super_admin', 'admin', 'guest'] },

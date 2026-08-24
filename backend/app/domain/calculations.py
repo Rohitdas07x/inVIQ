@@ -60,7 +60,7 @@ def classify_stock_health(days_remaining: Optional[float]) -> StockStatus:
     Classify a stock item as CRITICAL / WARNING / HEALTHY.
 
     Single pure-domain entry point for health classification.
-    The SQL query in queries.py derives its CASE expression thresholds
+    The SQL query in analytics_repo.py derives its CASE expression thresholds
     from StockThresholds — both implementations stay in sync.
 
     Args:
@@ -113,7 +113,7 @@ def format_stock_item(item: Any) -> Dict:
     Format a stock health ORM result row into an API response dict.
 
     Note: This function understands the shape of the SQLAlchemy named-tuple
-    returned by queries.get_latest_stock_health(). New callers that need
+    returned by analytics_repo.get_latest_stock_health(). New callers that need
     a plain-dict output should prefer building a dict directly in the
     service layer to avoid this domain→infrastructure coupling.
 

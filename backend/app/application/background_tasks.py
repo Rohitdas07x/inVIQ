@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Optional
 
 from sqlalchemy.orm import Session
 from app.infrastructure.database.models import Item, Location, InventoryTransaction
-from app.infrastructure.database.queries import get_critical_alerts
+from app.infrastructure.database.analytics_repo import get_critical_alerts
 from app.api.routes.websocket import queue_websocket_alert
 
 logger = logging.getLogger("smart_inventory.background")

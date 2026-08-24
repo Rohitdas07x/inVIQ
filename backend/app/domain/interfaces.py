@@ -243,3 +243,41 @@ class IAuditRepository(Protocol):
     def get_by_user(self, username: str, limit: int = 100) -> List[Any]:
         """Return audit entries attributed to a specific username."""
         ...
+
+
+# ---------------------------------------------------------------------------
+# IAnalyticsRepository
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class IAnalyticsRepository(Protocol):
+    """
+    Aggregation and analytical stock health queries.
+
+    Implemented by: infrastructure.database.analytics_repo.AnalyticsRepository
+    """
+
+    def get_latest_stock_health(
+        self,
+        org_id: Optional[int] = None,
+        location_id: Optional[int] = None,
+        category: Optional[str] = None,
+    ) -> List[Any]:
+        """Get latest stock health and days remaining across locations/items."""
+        ...
+
+    def get_critical_alerts(
+        self,
+        severity: str = "CRITICAL",
+        org_id: Optional[int] = None,
+    ) -> List[Any]:
+        """Get items with critical or warning stock levels."""
+        ...
+
+    def get_heatmap_data(
+        self,
+        org_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Get matrix-pivoted stock health data for heatmap visualization."""
+        ...
+

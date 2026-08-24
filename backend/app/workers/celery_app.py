@@ -75,5 +75,3 @@ if is_ssl:
     conf_dict["redis_backend_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
 
 celery_app.conf.update(conf_dict)
-
-

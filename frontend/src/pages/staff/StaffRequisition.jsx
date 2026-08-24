@@ -135,6 +135,7 @@ const StaffRequisition = () => {
                 items: validItems.map(i => ({
                     item_id: parseInt(i.item_id),
                     quantity_requested: parseInt(i.quantity),
+                    packaging_unit: i.packaging_unit || undefined,
                     notes: i.notes || undefined,
                 })),
             };
@@ -145,7 +146,7 @@ const StaffRequisition = () => {
                 setForm(prev => ({
                     ...prev,
                     notes: '',
-                    items: [{ item_id: '', quantity: 1, notes: '' }],
+                    items: [{ item_id: '', quantity: 1, packaging_unit: '', notes: '' }],
                 }));
             }
         } catch (err) {
@@ -318,15 +319,16 @@ const StaffRequisition = () => {
                             {success && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg border border-green-100 text-sm flex items-center gap-2"><CheckCircle2 size={18} />{success}</div>}
 
                             <div className="grid grid-cols-12 gap-3 text-xs font-medium text-slate-500 px-1 mb-2">
-                                <div className="col-span-6">Item</div>
+                                <div className="col-span-5">Item</div>
                                 <div className="col-span-2 text-center">Qty</div>
-                                <div className="col-span-3">Notes</div>
+                                <div className="col-span-2">Unit (Optional)</div>
+                                <div className="col-span-2">Notes</div>
                                 <div className="col-span-1"></div>
                             </div>
 
                             {form.items.map((row, index) => (
                                 <div key={index} className="grid grid-cols-12 gap-3 items-center mb-2 p-2 hover:bg-slate-50 rounded-lg transition">
-                                    <div className="col-span-6">
+                                    <div className="col-span-5">
                                         <select
                                             className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                             value={row.item_id}
@@ -347,7 +349,16 @@ const StaffRequisition = () => {
                                             onChange={(e) => updateItemRow(index, 'quantity', parseInt(e.target.value) || 1)}
                                         />
                                     </div>
-                                    <div className="col-span-3">
+                                    <div className="col-span-2">
+                                        <input
+                                            type="text"
+                                            placeholder="strip, box..."
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={row.packaging_unit || ''}
+                                            onChange={(e) => updateItemRow(index, 'packaging_unit', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-span-2">
                                         <input
                                             type="text"
                                             placeholder="Optional"

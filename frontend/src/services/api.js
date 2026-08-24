@@ -82,6 +82,10 @@ export const inventory = {
     updateItem: (id, data) => api.put(`/inventory/items/${id}`, data),
     deleteItem: (id) => api.delete(`/inventory/items/${id}`),
     getLocationItems: (locationId) => api.get(`/inventory/location/${locationId}/items`),
+    getPackagings: (itemId) => api.get(`/inventory/items/${itemId}/packagings`),
+    addPackaging: (itemId, data) => api.post(`/inventory/items/${itemId}/packagings`, data),
+    updatePackaging: (itemId, pkgId, data) => api.put(`/inventory/items/${itemId}/packagings/${pkgId}`, data),
+    deletePackaging: (itemId, pkgId) => api.delete(`/inventory/items/${itemId}/packagings/${pkgId}`),
     addTransaction: (data) => api.post('/inventory/transaction', data),
     addBulkTransaction: (data) => api.post('/inventory/bulk-transaction', data),
     scanDispense: (data) => api.post('/inventory/scan-dispense', data),
@@ -120,10 +124,20 @@ export const admin = {
     auditLogs: (params) => api.get('/admin/audit-logs', { params }),
     usersSummary: () => api.get('/admin/users/summary'),
     generateReport: (reportType, params) => api.get(`/admin/reports/generate?report_type=${reportType}&${params}`, { responseType: 'blob' }),
+    getMonthlySalesReport: (year, month) => api.get(`/admin/reports/monthly-sales?year=${year}&month=${month}`),
     getSuppliers: () => api.get('/admin/suppliers'),
     createSupplier: (data) => api.post('/admin/suppliers', data),
     updateSupplier: (id, data) => api.put(`/admin/suppliers/${id}`, data),
     deleteSupplier: (id) => api.delete(`/admin/suppliers/${id}`),
+};
+
+// ── Billing ───────────────────────────────────────────────────────────────
+export const billing = {
+    openSession: (data) => api.post('/billing/sessions', data),
+    scanItem: (sessionId, data) => api.post(`/billing/sessions/${sessionId}/scan`, data),
+    checkout: (sessionId) => api.post(`/billing/sessions/${sessionId}/checkout`),
+    getSession: (sessionId) => api.get(`/billing/sessions/${sessionId}`),
+    cancelSession: (sessionId) => api.delete(`/billing/sessions/${sessionId}`),
 };
 
 

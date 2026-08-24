@@ -128,7 +128,7 @@ services:
       dockerfile: Dockerfile
     container_name: inviq_prod_celery_worker
     restart: always
-    command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    command: ["/venv/bin/celery", "-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
     working_dir: /app/backend
     depends_on:
       app:
@@ -147,7 +147,7 @@ services:
       dockerfile: Dockerfile
     container_name: inviq_prod_celery_beat
     restart: always
-    command: ["/venv/bin/celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info"]
+    command: ["/venv/bin/celery", "-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
     working_dir: /app/backend
     depends_on:
       celery_worker:

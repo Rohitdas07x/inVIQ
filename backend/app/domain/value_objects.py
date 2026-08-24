@@ -14,7 +14,7 @@ Key design decisions
 • StockThresholds — central home for every business-rule constant.
   Previously the magic numbers < 3 (CRITICAL) and 3–7 (WARNING)
   were hardcoded directly inside the SQLAlchemy case() expression
-  in queries.py.  They are now imported from here, so changing a
+  in analytics_repo.py.  They are now imported from here, so changing a
   threshold is a one-line edit in one place.
 
 • ReorderPolicy — groups reorder-calculation parameters so callers

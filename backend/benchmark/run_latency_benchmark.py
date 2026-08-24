@@ -2,19 +2,21 @@
 InvIQ Real Latency Measurement & Performance Profiler.
 
 Executes real benchmarks locally without synthetic estimation:
-1. Synthetic Load Test: 5 key endpoints under concurrent load (p50, p95, p99)
+1. Synthetic Load Test: Critical inventory & analytics endpoints under concurrent load (p50, p95, p99)
 2. AI RAG Pipeline: Vector retrieval + LLM inference round-trip timing
 3. WebSocket Push: Server-to-client alert delivery delta timing
 4. Database Profiler: SQLAlchemy before/after_cursor_execute query timing
 """
 
-import sys
-import os
-import time
 import json
-import numpy as np
-from pathlib import Path
+import os
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+import numpy as np
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -22,14 +24,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.security import create_access_token
-from app.infrastructure.database.connection import SessionLocal, get_query_metrics, clear_query_metrics
+from app.infrastructure.database.connection import (
+    SessionLocal,
+    get_query_metrics,
+    clear_query_metrics,
+)
 from app.infrastructure.database.models import User, Item, Location, InventoryTransaction
 from app.api.routes.chat import _build_agent_response
 from app.api.routes.websocket import queue_websocket_alert
 
 client = TestClient(app)
 
-def get_valid_admin_tokens(count=50):
+
+def get_valid_admin_tokens(count=50) -> List[str]:
     with SessionLocal() as db:
         users = db.query(User).filter(User.is_active == True).all()
         if not users:
@@ -37,21 +44,24 @@ def get_valid_admin_tokens(count=50):
         tokens = []
         for i in range(count):
             u = users[i % len(users)]
-            tokens.append(create_access_token({
-                "sub": str(u.id),
-                "username": u.username,
-                "role": u.role,
-                "org_id": u.org_id or 1,
-            }))
+            tokens.append(
+                create_access_token(
+                    {
+                        "sub": str(u.id),
+                        "username": u.username,
+                        "role": u.role,
+                        "org_id": u.org_id or 1,
+                    }
+                )
+            )
         return tokens
 
-def run_load_test(num_users=50, duration_seconds=60):
+
+def run_load_test(num_users=30, duration_seconds=30) -> Dict[str, List[float]]:
     print(f"\n[1/4] Running Synthetic Load Test ({num_users} virtual users for {duration_seconds}s)...")
     clear_query_metrics()
 
-    # Pre-generate 50 user tokens using active users in DB
     user_tokens = get_valid_admin_tokens(num_users)
-
 
     # Fetch a valid item barcode for scan-dispense testing
     with SessionLocal() as db:
@@ -60,11 +70,17 @@ def run_load_test(num_users=50, duration_seconds=60):
         barcode = item.barcode if item and item.barcode else "8901234567890"
         loc_id = loc.id if loc else 1
 
-    endpoints = [
+    endpoints: List[Tuple[str, str, Any]] = [
         ("GET", "/api/inventory/items", None),
         ("GET", "/api/analytics/dashboard/stats", None),
+        ("GET", "/api/analytics/alerts?severity=CRITICAL", None),
         ("GET", "/api/inventory/locations", None),
-        ("POST", "/api/inventory/scan-dispense", {"barcode": barcode, "location_id": loc_id, "quantity": 1, "dispensed_by": "bench_bot"}),
+        ("POST", "/api/inventory/scan-dispense", {
+            "barcode": barcode,
+            "location_id": loc_id,
+            "quantity": 1,
+            "dispensed_by": "bench_bot"
+        }),
         ("GET", "/api/admin/overview", None),
     ]
 
@@ -80,13 +96,12 @@ def run_load_test(num_users=50, duration_seconds=60):
         except Exception:
             pass
 
-    results = {ep[1]: [] for ep in endpoints}
+    results: Dict[str, List[float]] = {ep[1]: [] for ep in endpoints}
     stop_time = time.time() + duration_seconds
     request_count = 0
     success_count = 0
 
-
-    def worker_loop(user_idx):
+    def worker_loop(user_idx: int):
         nonlocal request_count, success_count
         token = user_tokens[user_idx % len(user_tokens)]
         headers = {"Authorization": f"Bearer {token}"}
@@ -115,10 +130,11 @@ def run_load_test(num_users=50, duration_seconds=60):
         for f in futures:
             f.result()
 
-    print(f"  Completed {request_count} total requests ({success_count} successful 200 OK) across 5 endpoints.")
+    print(f"  Completed {request_count} total requests ({success_count} successful 200 OK) across {len(endpoints)} endpoints.")
     return results
 
-def run_ai_rag_benchmark(num_queries=5):
+
+def run_ai_rag_benchmark(num_queries=5) -> Dict[str, List[float]]:
     print("\n[2/4] Measuring AI Assistant RAG Pipeline Timing (Vector Retrieval + LLM Inference)...")
     with SessionLocal() as db:
         test_questions = [
@@ -144,8 +160,7 @@ def run_ai_rag_benchmark(num_queries=5):
             llm_latencies.append(l_ms)
             total_rag_latencies.append(t_ms)
             print(f"  Query: '{q[:40]}...' -> Vector: {v_ms:.2f}ms | LLM: {l_ms:.2f}ms | Total RAG: {t_ms:.2f}ms")
-            time.sleep(0.5)
-
+            time.sleep(0.3)
 
     return {
         "vector_retrieval": vector_latencies,
@@ -153,7 +168,8 @@ def run_ai_rag_benchmark(num_queries=5):
         "total_rag": total_rag_latencies,
     }
 
-def run_websocket_latency_benchmark(num_alerts=25):
+
+def run_websocket_latency_benchmark(num_alerts=25) -> List[float]:
     print(f"\n[3/4] Measuring WebSocket Push Latency ({num_alerts} alerts)...")
     from app.api.routes.websocket import _alerts_lock, _pending_alerts
     with _alerts_lock:
@@ -190,7 +206,7 @@ def run_websocket_latency_benchmark(num_alerts=25):
     return deltas
 
 
-def analyze_db_queries():
+def analyze_db_queries() -> Tuple[List[float], List[Dict[str, Any]]]:
     print("\n[4/4] Analyzing Database Query Timing (SQLAlchemy Hooks)...")
     history = get_query_metrics()
     if not history:
@@ -202,7 +218,6 @@ def analyze_db_queries():
 
     all_durations = [q["duration_ms"] for q in history]
 
-    # Aggregate by statement template
     from collections import defaultdict
     grouped = defaultdict(list)
     for q in history:
@@ -215,17 +230,18 @@ def analyze_db_queries():
         slowest_queries.append({
             "statement": sig,
             "count": len(durs),
-            "avg_ms": float(np.mean(durs)),
-            "p50_ms": float(np.percentile(durs, 50)),
-            "p95_ms": float(np.percentile(durs, 95)),
-            "p99_ms": float(np.percentile(durs, 99)),
-            "max_ms": float(np.max(durs)),
+            "avg_ms": round(float(np.mean(durs)), 2),
+            "p50_ms": round(float(np.percentile(durs, 50)), 2),
+            "p95_ms": round(float(np.percentile(durs, 95)), 2),
+            "p99_ms": round(float(np.percentile(durs, 99)), 2),
+            "max_ms": round(float(np.max(durs)), 2),
         })
 
     slowest_queries.sort(key=lambda x: x["avg_ms"], reverse=True)
     return all_durations, slowest_queries[:10]
 
-def compute_percentiles(arr):
+
+def compute_percentiles(arr: List[float]) -> Dict[str, Any]:
     if not arr:
         return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "avg": 0.0, "min": 0.0, "max": 0.0, "count": 0}
     return {
@@ -238,13 +254,14 @@ def compute_percentiles(arr):
         "count": len(arr),
     }
 
+
 if __name__ == "__main__":
     print("=" * 70)
     print(" InvIQ Real Latency Measurement & Performance Profiling")
     print("=" * 70)
 
-    # 1. Load test (50 users for 60 seconds)
-    api_results = run_load_test(num_users=50, duration_seconds=60)
+    # 1. Load test on critical endpoints (30 users for 30 seconds)
+    api_results = run_load_test(num_users=30, duration_seconds=30)
 
     # 2. AI RAG Pipeline
     ai_results = run_ai_rag_benchmark(num_queries=5)

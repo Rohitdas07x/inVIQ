@@ -1,59 +1,68 @@
 {
   "api": {
     "/api/inventory/items": {
-      "p50": 210.96,
-      "p95": 1465.21,
-      "p99": 3821.19,
-      "avg": 386.63,
-      "min": 1.39,
-      "max": 4032.96,
-      "count": 1342
+      "p50": 5400.96,
+      "p95": 6977.37,
+      "p99": 7105.79,
+      "avg": 5359.55,
+      "min": 2652.64,
+      "max": 7113.0,
+      "count": 53
     },
     "/api/analytics/dashboard/stats": {
-      "p50": 494.83,
-      "p95": 1891.4,
-      "p99": 2544.43,
-      "avg": 597.18,
-      "min": 61.02,
-      "max": 2772.14,
-      "count": 1332
+      "p50": 3893.39,
+      "p95": 5026.72,
+      "p99": 6011.76,
+      "avg": 3996.35,
+      "min": 3159.2,
+      "max": 6159.99,
+      "count": 30
+    },
+    "/api/analytics/alerts?severity=CRITICAL": {
+      "p50": 3534.3,
+      "p95": 4589.44,
+      "p99": 5833.77,
+      "avg": 3640.86,
+      "min": 2317.87,
+      "max": 6288.8,
+      "count": 30
     },
     "/api/inventory/locations": {
-      "p50": 206.73,
-      "p95": 827.98,
-      "p99": 1774.31,
-      "avg": 276.21,
-      "min": 1.32,
-      "max": 2286.33,
-      "count": 1315
+      "p50": 3981.74,
+      "p95": 5123.36,
+      "p99": 5967.39,
+      "avg": 3988.95,
+      "min": 1404.66,
+      "max": 6264.99,
+      "count": 30
     },
     "/api/inventory/scan-dispense": {
-      "p50": 533.35,
-      "p95": 1901.69,
-      "p99": 3530.51,
-      "avg": 650.25,
-      "min": 1.5,
-      "max": 5268.76,
-      "count": 1307
+      "p50": 5134.75,
+      "p95": 6029.48,
+      "p99": 7442.72,
+      "avg": 5037.49,
+      "min": 1733.59,
+      "max": 8012.95,
+      "count": 30
     },
     "/api/admin/overview": {
-      "p50": 237.78,
-      "p95": 1466.53,
-      "p99": 2393.84,
-      "avg": 366.89,
-      "min": 1.42,
-      "max": 3760.23,
-      "count": 1296
+      "p50": 6338.89,
+      "p95": 7822.68,
+      "p99": 8464.35,
+      "avg": 6454.83,
+      "min": 4989.68,
+      "max": 8577.15,
+      "count": 30
     }
   },
   "ai": {
     "vector_retrieval": {
-      "p50": 1.61,
-      "p95": 1142.44,
-      "p99": 1370.11,
-      "avg": 287.11,
-      "min": 1.26,
-      "max": 1427.03,
+      "p50": 1846.85,
+      "p95": 2905.24,
+      "p99": 3084.78,
+      "avg": 1812.1,
+      "min": 939.04,
+      "max": 3129.66,
       "count": 5
     },
     "llm_inference": {
@@ -66,124 +75,106 @@
       "count": 5
     },
     "total_rag": {
-      "p50": 3519.32,
-      "p95": 9309.87,
-      "p99": 10462.69,
-      "avg": 4950.42,
-      "min": 3446.9,
-      "max": 10750.9,
+      "p50": 1936.65,
+      "p95": 5143.07,
+      "p99": 5740.79,
+      "avg": 2460.42,
+      "min": 1035.04,
+      "max": 5890.22,
       "count": 5
     }
   },
   "websocket": {
-    "p50": 146.67,
-    "p95": 808.57,
-    "p99": 846.86,
-    "avg": 292.43,
-    "min": 49.86,
-    "max": 858.65,
+    "p50": 55.34,
+    "p95": 123.22,
+    "p99": 130.53,
+    "avg": 66.25,
+    "min": 48.21,
+    "max": 131.65,
     "count": 25
   },
   "database": {
     "all_queries": {
-      "p50": 506.71,
-      "p95": 723.63,
-      "p99": 1236.71,
-      "avg": 486.02,
-      "min": 241.67,
-      "max": 7884.45,
-      "count": 364
+      "p50": 515.82,
+      "p95": 1541.37,
+      "p99": 2367.07,
+      "avg": 577.3,
+      "min": 230.77,
+      "max": 3030.93,
+      "count": 312
     },
     "top_slowest": [
       {
-        "statement": "SELECT max(inventory_transactions.date) AS max_1 FROM inventory_transactions...",
-        "count": 19,
-        "avg_ms": 888.4879758360943,
-        "p50_ms": 537.9555829567835,
-        "p95_ms": 1421.266808302592,
-        "p99_ms": 6591.811328127516,
-        "max_ms": 7884.447458083741
-      },
-      {
-        "statement": "SELECT locations.id AS location_id, locations.name AS location_name, locations.type...",
-        "count": 18,
-        "avg_ms": 749.9197106614398,
-        "p50_ms": 566.5868544601835,
-        "p95_ms": 1373.9986892382108,
-        "p99_ms": 3302.9744378768323,
-        "max_ms": 3785.218375036493
-      },
-      {
-        "statement": "SELECT items.id AS items_id, items.org_id AS items_org_id, items.name...",
-        "count": 19,
-        "avg_ms": 597.7795021179573,
-        "p50_ms": 604.970125015825,
-        "p95_ms": 844.7129496722462,
-        "p99_ms": 1550.923089932185,
-        "max_ms": 1727.4756249971688
-      },
-      {
-        "statement": "SELECT inventory_transactions.id, inventory_transactions.location_id, inventory_transactions.item_id, inventory_transactions.date, inventory_transactions.opening_stock, inventory_transactions.received, inventory_transactions.issued,...",
-        "count": 19,
-        "avg_ms": 572.9324385205185,
-        "p50_ms": 536.3643750315532,
-        "p95_ms": 715.2927951188753,
-        "p99_ms": 857.2876254143193,
-        "max_ms": 892.7863329881802
-      },
-      {
-        "statement": "SELECT locations.id AS locations_id, locations.org_id AS locations_org_id, locations.name...",
-        "count": 6,
-        "avg_ms": 560.7038265055356,
-        "p50_ms": 560.895916481968,
-        "p95_ms": 817.1879582514521,
-        "p99_ms": 837.1945916383993,
-        "max_ms": 842.1962499851361
-      },
-      {
-        "statement": "SELECT users.role AS users_role, users.is_active AS users_is_active, count(users.id)...",
-        "count": 34,
-        "avg_ms": 543.069600545363,
-        "p50_ms": 528.6056875484064,
-        "p95_ms": 648.4006853541358,
-        "p99_ms": 702.697134858463,
-        "max_ms": 705.6612499291077
-      },
-      {
         "statement": "SELECT users.id AS users_id, users.org_id AS users_org_id, users.email...",
-        "count": 133,
-        "avg_ms": 485.76775564868143,
-        "p50_ms": 514.8590829921886,
-        "p95_ms": 573.3304335735738,
-        "p99_ms": 759.4422015082104,
-        "max_ms": 2988.1853339029476
-      },
-      {
-        "statement": "SELECT inventory_transactions.id AS inventory_transactions_id, inventory_transactions.location_id AS inventory_transactions_location_id, inventory_transactions.item_id...",
-        "count": 62,
-        "avg_ms": 356.30403288767764,
-        "p50_ms": 294.9583749868907,
-        "p95_ms": 570.208918408025,
-        "p99_ms": 644.5303018670529,
-        "max_ms": 691.3964999839664
+        "count": 219,
+        "avg_ms": 669.32,
+        "p50_ms": 528.64,
+        "p95_ms": 1671.68,
+        "p99_ms": 2382.17,
+        "max_ms": 3030.93
       },
       {
         "statement": "SELECT audit_logs.id AS audit_logs_id, audit_logs.user_id AS audit_logs_user_id, audit_logs.org_id...",
-        "count": 34,
-        "avg_ms": 298.1990525868776,
-        "p50_ms": 268.38520856108516,
-        "p95_ms": 473.73680570744887,
-        "p99_ms": 585.1957023423166,
-        "max_ms": 605.9782499214634
+        "count": 7,
+        "avg_ms": 486.5,
+        "p50_ms": 265.35,
+        "p95_ms": 865.2,
+        "p99_ms": 891.98,
+        "max_ms": 898.68
       },
       {
-        "statement": "INSERT INTO inventory_transactions (location_id, item_id, date, opening_stock, received,...",
+        "statement": "SELECT locations.id AS location_id, locations.name AS location_name, locations.type...",
         "count": 19,
-        "avg_ms": 282.3278728602944,
-        "p50_ms": 268.7549999682233,
-        "p95_ms": 363.2204291061498,
-        "p99_ms": 363.3225185913034,
-        "max_ms": 363.34804096259177
+        "avg_ms": 394.7,
+        "p50_ms": 313.06,
+        "p95_ms": 642.34,
+        "p99_ms": 680.96,
+        "max_ms": 690.61
+      },
+      {
+        "statement": "SELECT locations.id AS locations_id, locations.org_id AS locations_org_id, locations.name...",
+        "count": 33,
+        "avg_ms": 366.77,
+        "p50_ms": 270.89,
+        "p95_ms": 955.6,
+        "p99_ms": 1574.03,
+        "max_ms": 1747.64
+      },
+      {
+        "statement": "SELECT items.id AS items_id, items.org_id AS items_org_id, items.name...",
+        "count": 6,
+        "avg_ms": 347.2,
+        "p50_ms": 290.9,
+        "p95_ms": 599.16,
+        "p99_ms": 678.88,
+        "max_ms": 698.81
+      },
+      {
+        "statement": "SELECT users.role AS users_role, users.is_active AS users_is_active, count(users.id)...",
+        "count": 7,
+        "avg_ms": 325.46,
+        "p50_ms": 256.42,
+        "p95_ms": 602.59,
+        "p99_ms": 718.43,
+        "max_ms": 747.39
+      },
+      {
+        "statement": "SELECT max(inventory_transactions.date) AS max_1 FROM inventory_transactions...",
+        "count": 20,
+        "avg_ms": 296.11,
+        "p50_ms": 282.75,
+        "p95_ms": 348.98,
+        "p99_ms": 477.48,
+        "max_ms": 509.6
+      },
+      {
+        "statement": "SELECT inventory_transactions.date AS date, sum(inventory_transactions.issued) AS issued FROM...",
+        "count": 1,
+        "avg_ms": 243.74,
+        "p50_ms": 243.74,
+        "p95_ms": 243.74,
+        "p99_ms": 243.74,
+        "max_ms": 243.74
       }
     ]
   }
