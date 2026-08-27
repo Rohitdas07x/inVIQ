@@ -485,7 +485,7 @@ export default function Landing() {
               </div>
               <button
                 onClick={() => window.location.href = '/signup'}
-                className="mt-auto w-full h-10 px-4 inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white text-sm font-medium text-slate-900 hover:bg-slate-50 hover:border-slate-400 transition-all duration-200 cursor-pointer group"
+                className="mt-auto w-full h-11 px-4 inline-flex items-center justify-center gap-2 rounded-full border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-600 hover:bg-blue-600 hover:text-white hover:border-blue-600 hover:shadow-lg hover:shadow-blue-500/20 active:scale-98 transition-all duration-200 cursor-pointer group"
               >
                 Get Started Free
                 <MoveRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -526,7 +526,7 @@ export default function Landing() {
               </div>
               <button
                 onClick={() => window.location.href = '/signup'}
-                className="mt-auto w-full h-10 px-4 inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 text-sm font-medium text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer group"
+                className="mt-auto w-full h-11 px-4 inline-flex items-center justify-center gap-2 rounded-full bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-600/30 hover:scale-[1.02] active:scale-98 transition-all duration-200 cursor-pointer group"
               >
                 Start Free Trial
                 <MoveRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -567,7 +567,7 @@ export default function Landing() {
               </div>
               <button
                 onClick={() => window.location.href = '/signup'}
-                className="mt-auto w-full h-10 px-4 inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white text-sm font-medium text-slate-900 hover:bg-slate-50 hover:border-slate-400 transition-all duration-200 cursor-pointer group"
+                className="mt-auto w-full h-11 px-4 inline-flex items-center justify-center gap-2 rounded-full border border-blue-200 bg-blue-50 text-sm font-semibold text-blue-600 hover:bg-blue-600 hover:text-white hover:border-blue-600 hover:shadow-lg hover:shadow-blue-500/20 active:scale-98 transition-all duration-200 cursor-pointer group"
               >
                 Book a Meeting
                 <PhoneCall className="w-4 h-4" />
@@ -657,7 +657,7 @@ export default function Landing() {
               </p>
               <button 
                 onClick={() => window.location.href = '/signup'}
-                className="px-6 py-3 bg-[#5B65FF] text-white font-medium rounded-xl hover:bg-blue-600 hover:shadow-lg hover:shadow-indigo-500/25 hover:scale-105 active:scale-95 transition-all duration-200 shadow-sm cursor-pointer"
+                className="px-8 py-3.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-600/30 hover:scale-105 active:scale-95 transition-all duration-200 shadow-md cursor-pointer"
               >
                 Get started
               </button>
