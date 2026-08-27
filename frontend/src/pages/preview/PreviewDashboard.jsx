@@ -257,13 +257,10 @@ export default function PreviewDashboard() {
 
                         <div className="pt-2">
                             <button
-                                onClick={() => {
-                                    alert("Support ticket initiated. Our logistics engineering team will reach out within 15 minutes.");
-                                    setShowHelp(false);
-                                }}
-                                className="w-full py-2.5 bg-slate-900 text-white font-semibold text-sm hover:bg-black transition-colors"
+                                onClick={() => setShowHelp(false)}
+                                className="w-full py-2.5 bg-slate-900 text-white font-semibold text-sm hover:bg-black transition-colors rounded-none cursor-pointer"
                             >
-                                Contact Support Engineer
+                                OK, Got It
                             </button>
                         </div>
                     </div>
