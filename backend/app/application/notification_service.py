@@ -58,40 +58,37 @@ class NotificationService:
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="utf-8">
             <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                          color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
-                .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }}
-                .credentials {{ background: white; padding: 20px; border-radius: 8px; 
-                               border-left: 4px solid #667eea; margin: 20px 0; }}
-                .credential-row {{ margin: 10px 0; }}
-                .label {{ font-weight: bold; color: #667eea; }}
-                .value {{ font-family: 'Courier New', monospace; background: #f3f4f6; 
-                         padding: 5px 10px; border-radius: 4px; display: inline-block; }}
-                .button {{ display: inline-block; background: #667eea; color: white; 
-                          padding: 12px 30px; text-decoration: none; border-radius: 6px; 
-                          margin: 20px 0; font-weight: bold; }}
-                .warning {{ background: #fef3c7; border-left: 4px solid #f59e0b; 
-                           padding: 15px; margin: 20px 0; border-radius: 4px; }}
-                .footer {{ text-align: center; color: #6b7280; font-size: 12px; margin-top: 30px; }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 20px; background-color: #f8fafc; }}
+                .container {{ max-width: 520px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }}
+                .header {{ background: #0f172a; color: #ffffff; padding: 28px 24px; text-align: center; }}
+                .header h1 {{ margin: 0; font-size: 20px; font-weight: 700; }}
+                .header p {{ margin: 4px 0 0; opacity: 0.8; font-size: 13px; }}
+                .content {{ padding: 28px 24px; }}
+                .greeting {{ font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 12px; }}
+                .credentials {{ background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin: 18px 0; font-size: 13px; }}
+                .credential-row {{ margin: 6px 0; }}
+                .label {{ font-weight: 600; color: #475569; }}
+                .value {{ font-family: 'Courier New', monospace; background: #ffffff; border: 1px solid #e2e8f0; padding: 3px 8px; border-radius: 4px; display: inline-block; color: #0f172a; font-weight: 600; }}
+                .button {{ display: inline-block; background: #0f172a; color: #ffffff !important; padding: 11px 26px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; margin: 18px 0; }}
+                .warning {{ background: #f8fafc; border-left: 3px solid #0f172a; padding: 12px 14px; margin: 18px 0; font-size: 12px; color: #475569; border-radius: 0 4px 4px 0; }}
+                .footer {{ text-align: center; color: #94a3b8; font-size: 12px; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 14px; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🎉 Welcome to InvIQ</h1>
-                    <p>Smart Inventory Management System</p>
+                    <h1>InvIQ</h1>
+                    <p>Smart Inventory & Warehouse Management</p>
                 </div>
                 <div class="content">
-                    <p>Hi <strong>{display_name}</strong>,</p>
-                    
-                    <p>Your account has been created successfully! You now have access to InvIQ 
-                    as a <strong>{role.title()}</strong>.</p>
+                    <div class="greeting">Hi {display_name},</div>
+                    <p style="font-size: 14px; color: #334155; margin: 0 0 14px 0;">
+                        Your account has been created successfully. You now have access to InvIQ as a <strong>{role.title()}</strong>.
+                    </p>
                     
                     <div class="credentials">
-                        <h3 style="margin-top: 0; color: #667eea;">🔐 Account Details</h3>
                         <div class="credential-row">
                             <span class="label">Username:</span> 
                             <span class="value">{username}</span>
@@ -103,7 +100,7 @@ class NotificationService:
                     </div>
                     
                     <div class="warning">
-                        <strong>🔒 Security Notice:</strong> To ensure your account's security, please set your password using the secure activation link below. This single-use link expires in 24 hours.
+                        <strong>Security Notice:</strong> Please set your password using the single-use activation link below (valid for 24 hours).
                     </div>
                     
                     <div style="text-align: center;">
@@ -112,15 +109,14 @@ class NotificationService:
                         </a>
                     </div>
                     
-                    <p style="margin-top: 30px;">If you have any questions or need assistance, 
-                    please contact your system administrator.</p>
+                    <p style="font-size: 13px; color: #64748b; margin-top: 20px;">
+                        If you have questions, please reach out to your system administrator.
+                    </p>
                     
-                    <p>Best regards,<br>
-                    <strong>InvIQ Team</strong></p>
-                </div>
-                <div class="footer">
-                    <p>This is an automated message, please do not reply directly to this email.</p>
-                    <p>&copy; {settings.PROJECT_NAME}. All rights reserved.</p>
+                    <div class="footer">
+                        Best regards,<br>
+                        <strong>InvIQ Team</strong>
+                    </div>
                 </div>
             </div>
         </body>
@@ -165,11 +161,9 @@ class NotificationService:
             return 0
 
         is_critical = alert_status == "CRITICAL"
-        status_color = "#dc2626" if is_critical else "#d97706"  # red : amber
-        status_bg = "#fef2f2" if is_critical else "#fffbeb"
-        status_border = "#fca5a5" if is_critical else "#fcd34d"
-        status_label = "🔴 CRITICAL" if is_critical else "⚠️ WARNING"
-        subject = f"[InvIQ] {status_label} Low Stock Alert — {item_name}"
+        status_color = "#111827" if is_critical else "#475569"
+        status_label = "CRITICAL" if is_critical else "WARNING"
+        subject = f"[InvIQ] [{status_label}] Low Stock Alert: {item_name}"
 
         dashboard_url = f"{settings.FRONTEND_URL or 'http://localhost:5173'}/admin/inventory"
 
@@ -177,81 +171,61 @@ class NotificationService:
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="utf-8">
             <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                           color: white; padding: 24px 30px; border-radius: 10px 10px 0 0; }}
-                .header h1 {{ margin: 0; font-size: 22px; }}
-                .header p  {{ margin: 4px 0 0; opacity: 0.85; font-size: 14px; }}
-                .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }}
-                .alert-box {{
-                    background: {status_bg};
-                    border: 1px solid {status_border};
-                    border-left: 4px solid {status_color};
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin: 20px 0;
-                }}
-                .alert-box h2 {{ margin: 0 0 12px; color: {status_color}; font-size: 18px; }}
-                .detail-row {{ display: flex; justify-content: space-between;
-                               border-bottom: 1px solid #e5e7eb; padding: 8px 0; font-size: 14px; }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 20px; background-color: #f8fafc; }}
+                .container {{ max-width: 520px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }}
+                .header {{ background: #0f172a; color: #ffffff; padding: 24px; text-align: center; }}
+                .header h1 {{ margin: 0; font-size: 20px; font-weight: 700; }}
+                .header p {{ margin: 4px 0 0; opacity: 0.8; font-size: 13px; }}
+                .content {{ padding: 24px; }}
+                .alert-box {{ background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0f172a; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+                .alert-box h2 {{ margin: 0 0 10px; color: #0f172a; font-size: 16px; }}
+                .detail-row {{ display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding: 6px 0; font-size: 13px; }}
                 .detail-row:last-child {{ border-bottom: none; }}
-                .detail-label {{ color: #6b7280; font-weight: 600; }}
-                .detail-value {{ color: #111827; font-weight: 700; }}
-                .stock-value {{ color: {status_color}; font-size: 20px; font-weight: 800; }}
-                .button {{ display: inline-block; background: #4f46e5; color: white !important;
-                           padding: 12px 28px; text-decoration: none; border-radius: 8px;
-                           font-weight: 600; margin: 20px 0; font-size: 14px; }}
-                .footer {{ text-align: center; color: #9ca3af; font-size: 12px; margin-top: 20px; }}
+                .detail-label {{ color: #64748b; font-weight: 600; }}
+                .detail-value {{ color: #0f172a; font-weight: 700; }}
+                .stock-value {{ color: #0f172a; font-size: 18px; font-weight: 800; }}
+                .button {{ display: inline-block; background: #0f172a; color: #ffffff !important; padding: 11px 26px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; margin: 18px 0; }}
+                .footer {{ text-align: center; color: #94a3b8; font-size: 12px; margin-top: 20px; border-top: 1px solid #f1f5f9; padding-top: 14px; }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
                     <h1>InvIQ — Stock Alert</h1>
-                    <p>Automated inventory monitoring notification</p>
+                    <p>Automated Inventory Alert</p>
                 </div>
                 <div class="content">
                     <div class="alert-box">
-                        <h2>{status_label} — Immediate Attention Required</h2>
+                        <h2>{status_label} Stock Alert</h2>
                         <div class="detail-row">
-                            <span class="detail-label">Item</span>
+                            <span class="detail-label">Item:</span>
                             <span class="detail-value">{item_name}</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">Location</span>
+                            <span class="detail-label">Location:</span>
                             <span class="detail-value">{location_name}</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">Current Stock</span>
+                            <span class="detail-label">Current Stock:</span>
                             <span class="stock-value">{current_stock}</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">Minimum Required</span>
+                            <span class="detail-label">Minimum Required:</span>
                             <span class="detail-value">{min_stock}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Shortage</span>
-                            <span class="detail-value">{max(0, min_stock - current_stock)} units below threshold</span>
                         </div>
                     </div>
 
-                    <p>Please review inventory levels and initiate a requisition or restock order immediately.</p>
+                    <p style="font-size: 13px; color: #475569;">Please review inventory levels and initiate a restock order if needed.</p>
 
                     <div style="text-align: center;">
                         <a href="{dashboard_url}" class="button">View Inventory Dashboard →</a>
                     </div>
 
-                    <p style="color: #6b7280; font-size: 13px; margin-top: 20px;">
-                        This alert was triggered automatically when stock for <strong>{item_name}</strong>
-                        fell {"to zero or below" if is_critical else "below the minimum threshold"}.
-                        Item ID: {item_id} | Location ID: {location_id}
-                    </p>
-                </div>
-                <div class="footer">
-                    <p>You are receiving this because you are a manager or admin in InvIQ.</p>
-                    <p>&copy; 2026 InvIQ — Smart Inventory Management System</p>
+                    <div class="footer">
+                        <p>&copy; 2026 InvIQ. All rights reserved.</p>
+                    </div>
                 </div>
             </div>
         </body>
@@ -266,16 +240,16 @@ class NotificationService:
 
     @staticmethod
     def send_admin_congratulations_email(
-        to_email: str = "bwubts23263@brainwareuniversity.ac.in",
-        username: str = "admin",
+        to_email: str,
+        username: str,
         full_name: Optional[str] = None,
         organization_name: Optional[str] = None,
     ) -> bool:
         """
-        Send a congratulations email to an Admin who just signed up in InvIQ.
+        Send a clean, concise monochromatic (black/white/grey) welcome email to an Admin.
 
         Args:
-            to_email: Admin's email address (default/test: bwubts23263@brainwareuniversity.ac.in)
+            to_email: Admin's email address
             username: Admin username
             full_name: Admin's full name (optional)
             organization_name: Organization name (optional)
@@ -285,9 +259,11 @@ class NotificationService:
         """
         display_name = full_name or username
         sender_contact = "sayandipbar05@gmail.com"
-        subject = f"🎉 Welcome to InvIQ Admin Control — Message from {sender_contact}"
+        subject = f"Welcome to InvIQ, {display_name}!"
         org_line = f" for <strong>{organization_name}</strong>" if organization_name else ""
         dashboard_url = f"{settings.FRONTEND_URL or 'http://localhost:5173'}/admin/dashboard"
+
+        org_row = f'<div style="margin: 4px 0;"><strong>Organization:</strong> {organization_name}</div>' if organization_name else ''
 
         html_content = f"""
         <!DOCTYPE html>
@@ -295,87 +271,38 @@ class NotificationService:
         <head>
             <meta charset="utf-8">
             <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background-color: #f8fafc; }}
-                .wrapper {{ max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0; }}
-                .header {{ background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #2563eb 100%); color: white; padding: 40px 30px; text-align: center; }}
-                .header h1 {{ margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }}
-                .header p {{ margin: 8px 0 0; opacity: 0.9; font-size: 15px; }}
-                .badge {{ display: inline-block; background: rgba(255, 255, 255, 0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }}
-                .content {{ padding: 32px 30px; }}
-                .greeting {{ font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }}
-                .personal-card {{ background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin-bottom: 24px; }}
-                .personal-title {{ font-weight: 700; color: #166534; font-size: 14px; margin-bottom: 6px; }}
-                .personal-text {{ font-size: 13px; color: #15803d; margin: 0; line-height: 1.5; }}
-                .feature-grid {{ margin: 24px 0; display: grid; gap: 12px; }}
-                .feature-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; }}
-                .feature-title {{ font-weight: 700; color: #4338ca; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; }}
-                .feature-desc {{ font-size: 13px; color: #64748b; margin: 0; }}
-                .action-box {{ text-align: center; margin: 32px 0 24px; }}
-                .btn-primary {{ display: inline-block; background: #4f46e5; color: #ffffff !important; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35); }}
-                .signature-box {{ border-top: 1px solid #e2e8f0; padding-top: 20px; margin-top: 24px; }}
-                .footer {{ background: #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; color: #0f172a; margin: 0; padding: 20px; background-color: #f8fafc; }}
+                .card {{ max-width: 440px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 28px; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }}
+                .header {{ margin-bottom: 20px; text-align: center; }}
+                .logo-text {{ font-size: 24px; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.5px; }}
+                .greeting {{ font-size: 16px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }}
+                .text {{ font-size: 14px; color: #334155; margin-bottom: 16px; line-height: 1.6; }}
+                .info-box {{ background: #f8fafc; border-radius: 8px; padding: 14px 16px; margin: 16px 0; font-size: 13px; color: #1e293b; border: 1px solid #e2e8f0; }}
+                .btn-wrapper {{ text-align: center; margin: 24px 0 16px; }}
+                .btn {{ display: inline-block; background: #0f172a; color: #ffffff !important; padding: 11px 26px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }}
+                .footer {{ text-align: center; font-size: 12px; color: #94a3b8; margin-top: 20px; border-top: 1px solid #f1f5f9; padding-top: 14px; }}
             </style>
         </head>
         <body>
-            <div class="wrapper">
+            <div class="card">
                 <div class="header">
-                    <div class="badge">InvIQ Administrator</div>
-                    <h1>🎉 Congratulations & Welcome!</h1>
-                    <p>Your Admin account is fully activated and ready</p>
+                    <h1 class="logo-text">InvIQ</h1>
                 </div>
-                <div class="content">
-                    <div class="greeting">Hello {display_name},</div>
-                    
-                    <div class="personal-card">
-                        <div class="personal-title">✉️ Direct Welcome Note from Founder & Lead Engineering:</div>
-                        <p class="personal-text">
-                            "Welcome to the InvIQ ecosystem! As an administrator, you are equipped with state-of-the-art AI tooling, automated delivery reconciliation, and zero-latency inventory tracking designed specifically for healthcare excellence."
-                            <br><br>
-                            — <strong>Sayandip Bar</strong> (<a href="mailto:{sender_contact}" style="color: #166534; font-weight: 600;">{sender_contact}</a>)
-                        </p>
-                    </div>
-
-                    <p>
-                        Congratulations on signing up as an <strong>Administrator</strong>{org_line} on <strong>InvIQ</strong>.
-                    </p>
-                    <p>
-                        With your Admin privileges, you have complete oversight and command of your operations:
-                    </p>
-                    <div class="feature-grid">
-                        <div class="feature-card">
-                            <div class="feature-title">📊 Multi-Location Inventory Control</div>
-                            <p class="feature-desc">Monitor real-time stock levels, batch numbers, expiry dates, and cold-chain compliance across all warehouses and clinics.</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-title">🤖 AI Assistant & Semantic Memory</div>
-                            <p class="feature-desc">Ask complex operational queries, trigger automated reconciliations, and tap into conversational memory powered by Groq & Gemini.</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-title">📥 AI-Powered Data Import</div>
-                            <p class="feature-desc">Instantly map and ingest vendor CSV and Excel delivery files with automated column matching and confidence gating.</p>
-                        </div>
-                        <div class="feature-card">
-                            <div class="feature-title">⚡ Requisitions & Role Access</div>
-                            <p class="feature-desc">Approve or reject stock requisition requests, invite team members, and manage staff permissions.</p>
-                        </div>
-                    </div>
-                    <div class="action-box">
-                        <a href="{dashboard_url}" class="btn-primary">Launch Admin Dashboard →</a>
-                    </div>
-                    
-                    <div class="signature-box">
-                        <p style="font-size: 13px; color: #475569; margin: 0;">
-                            For onboarding support, integration assistance, or custom features, reach out directly at:<br>
-                            <strong>📧 {sender_contact}</strong>
-                        </p>
-                        <p style="font-size: 13px; color: #64748b; margin-top: 8px;">
-                            Username: <strong>{username}</strong> | Registered Email: <strong>{to_email}</strong>
-                        </p>
-                    </div>
+                <div class="greeting">Hi {display_name},</div>
+                <p class="text">
+                    Welcome to <strong>InvIQ</strong>! Your administrator account is now active{org_line}. You can log in to manage inventory, monitor stock health, and access the AI assistant.
+                </p>
+                <div class="info-box">
+                    <div style="margin: 4px 0;"><strong>Username:</strong> {username}</div>
+                    <div style="margin: 4px 0;"><strong>Email:</strong> {to_email}</div>
+                    {org_row}
+                </div>
+                <div class="btn-wrapper">
+                    <a href="{dashboard_url}" class="btn">Open Admin Dashboard →</a>
                 </div>
                 <div class="footer">
-                    <p>This message was sent from InvIQ Platform Engineering to confirm your administrator onboarding.</p>
-                    <p>&copy; 2026 InvIQ — Intelligent Healthcare Inventory Management System</p>
+                    Best regards,<br>
+                    <strong>InvIQ Team</strong>
                 </div>
             </div>
         </body>
@@ -387,7 +314,7 @@ class NotificationService:
             subject=subject,
             html_content=html_content,
             from_email=sender_contact,
-            from_name="Sayandip Bar",
+            from_name="InvIQ",
             reply_to=sender_contact,
         )
 

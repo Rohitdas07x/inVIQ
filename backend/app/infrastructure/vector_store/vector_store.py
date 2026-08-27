@@ -181,6 +181,57 @@ class VectorMemory:
         except Exception as e:
             logger.warning("Failed to store message in vector memory: %s", e)
 
+    def add_onboarding_context(
+        self,
+        org_id: Optional[int],
+        user_id: Optional[int],
+        full_name: str,
+        pharmacy_name: str,
+        primary_counter: str = "Main Market Counter",
+        plan_type: str = "single_pharmacy",
+        extra_settings: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Embed and store store owner/admin onboarding profile context for semantic RAG recall."""
+        if not self._available:
+            return
+
+        now = datetime.now()
+        ts_str = now.strftime("%Y-%m-%d %H:%M")
+        content = (
+            f"Pharmacy Owner Profile: {full_name or 'Store Admin'}. "
+            f"Medical Store & Pharmacy Name: {pharmacy_name or 'Pharmacy Store'}. "
+            f"Primary Retail Counter / Location: {primary_counter or 'Main Counter'}. "
+            f"Subscription Tier: {plan_type or 'single_pharmacy'}. "
+            f"Onboarded on: {ts_str}. "
+            f"InvIQ Assistant should address this user as the owner of {pharmacy_name or 'their pharmacy store'}."
+        )
+
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"onboarding_org_{org_id}_user_{user_id}"))
+
+        try:
+            vector = self._embed(content)
+            self._client.upsert(
+                collection_name=self._collection,
+                points=[
+                    PointStruct(
+                        id=point_id,
+                        vector=vector,
+                        payload={
+                            "session_id": "onboarding_profile",
+                            "role": "system",
+                            "timestamp": ts_str,
+                            "content": content,
+                            "org_id": org_id,
+                            "user_id": user_id,
+                            "type": "onboarding_profile",
+                        },
+                    )
+                ],
+            )
+            logger.info("✅ Onboarding context indexed in Vector Memory for org_id=%s, user_id=%s", org_id, user_id)
+        except Exception as e:
+            logger.warning("Failed to store onboarding profile in vector memory: %s", e)
+
     def search_relevant(
         self,
         query: str,

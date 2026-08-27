@@ -113,6 +113,10 @@ def invoke_agent(
     question: str,
     conversation_history: list[dict] = None,
     vector_context: str = "",
+    admin_name: str = None,
+    pharmacy_name: str = None,
+    primary_counter: str = None,
+    has_inventory: bool = True,
 ) -> str:
     """
     Run the LangGraph ReAct agent on a user question.
@@ -120,7 +124,11 @@ def invoke_agent(
     Args:
         question: The user's natural language query
         conversation_history: List of {"role": ..., "content": ...} dicts
-        vector_context: Relevant past context from ChromaDB
+        vector_context: Relevant past context from Vector DB
+        admin_name: Name of the pharmacy store admin
+        pharmacy_name: Name of the medical store / pharmacy
+        primary_counter: Name of primary counter
+        has_inventory: Boolean flag indicating if pharmacy has items
 
     Returns:
         The agent's text response
@@ -133,10 +141,14 @@ def invoke_agent(
     if not is_agent_available():
         raise RuntimeError("LLM agent not available")
 
-    # Build the system prompt with current time + past context
+    # Build the system prompt with current time + past context + admin profile
     system_prompt = get_system_prompt(
         current_date=datetime.now(),
         past_context=vector_context if vector_context else None,
+        admin_name=admin_name,
+        pharmacy_name=pharmacy_name,
+        primary_counter=primary_counter,
+        has_inventory=has_inventory,
     )
 
     # Build message list: system → history → current question

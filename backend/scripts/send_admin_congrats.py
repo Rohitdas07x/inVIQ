@@ -6,8 +6,7 @@ Standalone utility script to send congratulations email to an Administrator
 upon signing up in InvIQ.
 
 Usage:
-  python send_admin_congrats.py
-  python send_admin_congrats.py --email bwubts23263@brainwareuniversity.ac.in --name "Sayandip Bar" --username admin
+  python send_admin_congrats.py --email admin@example.com --name "Administrator" --username admin
 """
 
 import os
@@ -27,7 +26,7 @@ from app.application.notification_service import NotificationService
 
 
 def send_congratulations_email(
-    to_email: str = "bwubts23263@brainwareuniversity.ac.in",
+    to_email: str = "sayandipbar05@gmail.com",
     username: str = "admin",
     full_name: str = "Sayandip Bar",
     org_name: str = "InvIQ Healthcare Network",
@@ -162,8 +161,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Send congratulations email to InvIQ Admin")
     parser.add_argument(
         "--email",
-        default="bwubts23263@brainwareuniversity.ac.in",
-        help="Recipient email address (default: bwubts23263@brainwareuniversity.ac.in)",
+        default="sayandipbar05@gmail.com",
+        help="Recipient email address (default: sayandipbar05@gmail.com)",
     )
     parser.add_argument(
         "--username",

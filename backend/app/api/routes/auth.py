@@ -195,9 +195,10 @@ def register(
     db: Session = Depends(get_user_repo),
     current_user: User = Depends(require_admin),
 ):
-    if request_body.role not in ["admin", "staff", "vendor"]:
+    role = request_body.role or "staff"
+    if role not in ["admin", "staff", "vendor"]:
         raise ValidationError(
-            f"Invalid role: {request_body.role}. Must be admin, staff, or vendor"
+            f"Invalid role: {role}. Must be admin, staff, or vendor"
         )
 
     # Allocate new staff / vendor strictly to the current admin's pharmacy organization
@@ -342,12 +343,15 @@ def signup(
 
 
     if user.role == "admin":
-        NotificationService.send_admin_congratulations_email(
-            to_email=user.email,
-            username=user.username,
-            full_name=user.full_name,
-            organization_name=org_name,
-        )
+        try:
+            NotificationService.send_admin_congratulations_email(
+                to_email=user.email,
+                username=user.username,
+                full_name=user.full_name,
+                organization_name=org_name,
+            )
+        except Exception as mail_err:
+            logger.warning("Could not send welcome email on signup: %s", mail_err)
 
 
     # Audit log
@@ -660,14 +664,43 @@ def update_my_profile(
         current_user.email = str(request_body.email)
         changes["email"] = str(request_body.email)
 
+    if request_body.username is not None and request_body.username.strip():
+        new_username = request_body.username.strip().lower()
+        existing = db.get_by_username(new_username)
+        if existing and existing.id != current_user.id:
+            raise ValidationError("Username already taken")
+        current_user.username = new_username
+        changes["username"] = new_username
+
     if request_body.full_name is not None:
-        current_user.full_name = request_body.full_name
-        changes["full_name"] = request_body.full_name
+        current_user.full_name = request_body.full_name.strip() if request_body.full_name else None
+        changes["full_name"] = current_user.full_name
 
     if not changes:
         raise ValidationError("No fields provided to update")
 
     db.update(current_user)
+
+    # If full name changed, update vector memory asynchronously
+    if "full_name" in changes and current_user.org_id:
+        try:
+            from app.workers.tasks import sync_onboarding_context_task
+            from app.infrastructure.database.models import Organization
+            org = db.db.query(Organization).filter(Organization.id == current_user.org_id).first()
+            if org:
+                primary_counter = (org.settings or {}).get("primary_counter_name", "Main Market Counter")
+                plan_type = (org.settings or {}).get("plan_type", org.plan or "single_pharmacy")
+                sync_onboarding_context_task.delay(
+                    org_id=org.id,
+                    user_id=current_user.id,
+                    full_name=current_user.full_name or current_user.username,
+                    pharmacy_name=org.name,
+                    primary_counter=primary_counter,
+                    plan_type=plan_type,
+                    extra_settings=org.settings or {},
+                )
+        except Exception as exc:
+            logger.warning("Could not sync vector memory on profile update: %s", exc)
 
     # Audit log
     audit = AuditService(db.db)
@@ -1330,14 +1363,14 @@ def verify_email(
 
 
 @router.post("/google-auth")
-@limiter.limit("10/minute")
+@limiter.limit(settings.RATE_LIMIT_AUTH)
 def google_auth(
     request: Request,
     response: Response,
     request_body: GoogleAuthRequest,
     db: Session = Depends(get_user_repo),
 ):
-    """Authenticate or register user via Google OAuth."""
+    """Authenticate or register user via Google OAuth (ID token or OAuth2 access token)."""
     client_id = (settings.GOOGLE_CLIENT_ID or "").strip()
     if not client_id:
         return JSONResponse(
@@ -1351,17 +1384,63 @@ def google_auth(
             },
         )
 
+    token_str = (request_body.id_token or "").strip()
+    if not token_str:
+        raise AuthenticationError("Google token is required")
+
     try:
         from google.oauth2 import id_token as google_id_token
         from google.auth.transport import requests as google_requests
 
         id_info = google_id_token.verify_oauth2_token(
-            request_body.id_token,
+            token_str,
             google_requests.Request(),
             client_id,
         )
     except ValueError as ve:
-        raise AuthenticationError(f"Invalid Google ID token: {str(ve)}")
+        # If verify_oauth2_token fails, attempt OAuth2 access token verification via Google APIs
+        try:
+            import httpx
+            # Verify token audience with Google tokeninfo
+            tokeninfo_res = httpx.get(
+                f"https://oauth2.googleapis.com/tokeninfo?access_token={token_str}",
+                timeout=10.0,
+            )
+            if tokeninfo_res.status_code != 200:
+                raise AuthenticationError(f"Invalid Google ID token: {str(ve)}")
+            tokeninfo_data = tokeninfo_res.json()
+
+            token_aud = (
+                tokeninfo_data.get("azp")
+                or tokeninfo_data.get("aud")
+                or tokeninfo_data.get("issued_to")
+                or tokeninfo_data.get("audience")
+            )
+            if client_id and token_aud and token_aud != client_id and tokeninfo_data.get("azp") != client_id and tokeninfo_data.get("aud") != client_id:
+                logger.warning("Token audience mismatch: got %s (azp=%s, aud=%s), expected %s", token_aud, tokeninfo_data.get("azp"), tokeninfo_data.get("aud"), client_id)
+                raise AuthenticationError("Google access token audience mismatch")
+
+            # Fetch user profile from userinfo
+            userinfo_res = httpx.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {token_str}"},
+                timeout=10.0,
+            )
+            userinfo_data = userinfo_res.json() if userinfo_res.status_code == 200 else {}
+
+            id_info = {
+                "email": userinfo_data.get("email") or tokeninfo_data.get("email"),
+                "email_verified": userinfo_data.get("email_verified", tokeninfo_data.get("email_verified", True)),
+                "name": userinfo_data.get("name", tokeninfo_data.get("name", "")),
+                "sub": userinfo_data.get("sub") or tokeninfo_data.get("sub"),
+                "iss": "https://accounts.google.com",
+                "aud": client_id,
+            }
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            logger.error("Google Access Token verification failed: %s", str(e))
+            raise AuthenticationError("Google access token verification failed")
     except Exception as e:
         logger.error("Google OAuth token verification failed: %s", str(e))
         raise AuthenticationError("Google ID token verification failed")
@@ -1385,6 +1464,11 @@ def google_auth(
     if not aud or aud != client_id:
         raise AuthenticationError("Google ID token audience mismatch")
 
+    is_super_admin = (
+        bool(settings.SUPER_ADMIN_EMAIL)
+        and google_email.lower() == settings.SUPER_ADMIN_EMAIL.strip().lower()
+    )
+
     # Check if user exists
     user = db.get_by_email(google_email)
 
@@ -1392,6 +1476,11 @@ def google_auth(
         # Existing user - log them in
         if not user.is_active:
             raise AuthenticationError("User account is disabled")
+
+        if is_super_admin and user.role != "super_admin":
+            user.role = "super_admin"
+            user.org_id = None
+            db.update(user)
 
         db.record_login(user)
 
@@ -1426,6 +1515,7 @@ def google_auth(
                 "success": True,
                 "message": "Login successful",
                 "data": {
+                    "access_token": access_token,
                     "token_type": "bearer",
                     "user": _user_dict(user),
                 },
@@ -1434,7 +1524,7 @@ def google_auth(
         _set_auth_cookies(json_resp, access_token, refresh_token)
         return json_resp
 
-    # New user - create account as Staff (never auto-provision as admin)
+    # New user - create account
     from app.infrastructure.database.models import Organization, Location
     import secrets
 
@@ -1446,41 +1536,51 @@ def google_auth(
         username = f"{base_username}_{counter}"
         counter += 1
 
-    # Create Organization for this registered user
-    base_slug = username.replace("_", "-")
-    slug = base_slug
-    counter = 1
-    while db.db.query(Organization).filter(Organization.slug == slug).first():
-        slug = f"{base_slug}-{counter}"
-        counter += 1
+    org_name = None
+    if not is_super_admin:
+        # Create Organization for regular tenant user
+        base_slug = username.replace("_", "-")
+        slug = base_slug
+        counter = 1
+        while db.db.query(Organization).filter(Organization.slug == slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
 
-    org_name = f"{google_name or username}'s Pharmacy & Medical Store"
-    new_org = Organization(name=org_name, slug=slug, is_active=True)
-    db.db.add(new_org)
-    db.db.commit()
-    db.db.refresh(new_org)
+        org_name = f"{google_name or username}'s Pharmacy & Medical Store"
+        new_org = Organization(name=org_name, slug=slug, is_active=True)
+        db.db.add(new_org)
+        db.db.commit()
+        db.db.refresh(new_org)
 
-    # Create default Main Pharmacy Counter location
-    default_location = Location(
-        org_id=new_org.id,
-        name=f"{google_name or username} - Main Counter",
-        type="retail_counter",
-        region="Default Region",
-        address="Main Store Location",
-    )
-    db.db.add(default_location)
-    db.db.commit()
-    db.db.refresh(default_location)
+        # Create default Main Pharmacy Counter location
+        default_location = Location(
+            org_id=new_org.id,
+            name=f"{google_name or username} - Main Counter",
+            type="retail_counter",
+            region="Default Region",
+            address="Main Store Location",
+        )
+        db.db.add(default_location)
+        db.db.commit()
+        db.db.refresh(default_location)
 
-    # Create user with Google OAuth as staff (never admin)
+        assigned_org_id = new_org.id
+        assigned_locs = [default_location.id]
+        role = "admin"
+    else:
+        assigned_org_id = None
+        assigned_locs = []
+        role = "super_admin"
+
+    # Create user with Google OAuth
     user = db.create(
         email=google_email,
         username=username,
         password=secrets.token_urlsafe(32),  # Random secure password
         full_name=google_name,
-        role="staff",  # Safe default: staff role (never admin)
-        org_id=new_org.id,
-        location_ids=[default_location.id],
+        role=role,
+        org_id=assigned_org_id,
+        location_ids=assigned_locs,
     )
 
     user.is_verified = True
@@ -1511,11 +1611,23 @@ def google_auth(
         ip_address=_get_client_ip(request),
     )
 
+    # Dispatch welcome email to user's Gmail
+    try:
+        NotificationService.send_admin_congratulations_email(
+            to_email=user.email,
+            username=user.username,
+            full_name=user.full_name,
+            organization_name=org_name,
+        )
+    except Exception as mail_err:
+        logger.warning("Could not dispatch welcome email on Google signup: %s", mail_err)
+
     json_resp = JSONResponse(
         content={
             "success": True,
             "message": "Account created successfully via Google",
             "data": {
+                "access_token": access_token,
                 "token_type": "bearer",
                 "user": _user_dict(user),
             },

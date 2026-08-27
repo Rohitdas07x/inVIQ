@@ -14,7 +14,7 @@ def test_send_admin_congratulations_disabled_smtp():
         s.SMTP_HOST = "smtp.gmail.com"
         s.SMTP_USER = "test@inviq.io"
         res = NotificationService.send_admin_congratulations_email(
-            to_email="bwubts23263@brainwareuniversity.ac.in",
+            to_email="admin@example.com",
             username="admin",
             full_name="Sayandip Bar",
         )
@@ -39,7 +39,7 @@ def test_send_admin_congratulations_success():
         mock_smtp.return_value.__enter__.return_value = mock_server
 
         res = NotificationService.send_admin_congratulations_email(
-            to_email="bwubts23263@brainwareuniversity.ac.in",
+            to_email="admin@example.com",
             username="admin_sayandip",
             full_name="Sayandip Bar",
             organization_name="InvIQ Central",

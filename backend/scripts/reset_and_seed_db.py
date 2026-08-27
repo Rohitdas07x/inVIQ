@@ -342,8 +342,8 @@ def reset_and_seed():
         # ─────────────────────────────────────────────────────────────────────
         print("👑 Creating Platform Super Admin (Sayandip)...")
         superadmin = User(
-            org_id=org_multi.id,
-            email="sayandip@inviq.io",
+            org_id=None,
+            email="sayandipbar05@gmail.com",
             username="superadmin",
             full_name="Sayandip Bar",
             hashed_password=hash_password("superadmin123"),

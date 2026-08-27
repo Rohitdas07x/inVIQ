@@ -138,6 +138,23 @@ def update_pharmacy_organization(
     db.commit()
     db.refresh(org)
 
+    # Asynchronously index onboarding context into Vector Memory for AI assistant personalization
+    try:
+        from app.workers.tasks import sync_onboarding_context_task
+        primary_counter = (org.settings or {}).get("primary_counter_name", "Main Market Counter")
+        plan_type = (org.settings or {}).get("plan_type", org.plan or "single_pharmacy")
+        sync_onboarding_context_task.delay(
+            org_id=org.id,
+            user_id=current_user.id,
+            full_name=current_user.full_name or current_user.username,
+            pharmacy_name=org.name,
+            primary_counter=primary_counter,
+            plan_type=plan_type,
+            extra_settings=org.settings or {},
+        )
+    except Exception as e:
+        logger.warning("Could not dispatch onboarding vector indexing: %s", e)
+
     return {
         "success": True,
         "message": "Pharmacy organization profile updated successfully",

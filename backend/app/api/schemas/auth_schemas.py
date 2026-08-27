@@ -36,7 +36,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=100)
-    role: str = Field(default="staff", pattern="^(super_admin|admin|staff|vendor)$")
+    role: Optional[str] = Field(default=None, pattern="^(super_admin|admin|staff|vendor)$")
     location_ids: Optional[List[int]] = Field(default_factory=list)
 
     @field_validator("password")
@@ -58,6 +58,7 @@ class UserProfileUpdate(BaseModel):
     """Used by PATCH /auth/me — users update their own profile."""
 
     email: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, min_length=3, max_length=100)
     full_name: Optional[str] = Field(None, max_length=200)
 
 

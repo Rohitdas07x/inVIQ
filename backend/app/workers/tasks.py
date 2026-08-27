@@ -295,6 +295,50 @@ def sync_vector_embeddings_task(
     }
 
 
+@_task_wrapper(name="app.workers.tasks.sync_onboarding_context_task")
+def sync_onboarding_context_task(
+    org_id: Optional[int],
+    user_id: Optional[int],
+    full_name: str,
+    pharmacy_name: str,
+    primary_counter: str = "Main Market Counter",
+    plan_type: str = "single_pharmacy",
+    extra_settings: Optional[Dict[str, Any]] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Asynchronously indexes pharmacy owner and store onboarding context into Qdrant Vector Memory.
+    """
+    correlation_id = correlation_id or str(uuid.uuid4())
+    logger.info(
+        "Executing Onboarding Vector Indexing | Org ID: %s | User: %s | Store: %s",
+        org_id, user_id, pharmacy_name,
+    )
+    from app.infrastructure.vector_store.vector_store import get_vector_memory
+    memory = get_vector_memory()
+
+    if memory.is_available:
+        try:
+            memory.add_onboarding_context(
+                org_id=org_id,
+                user_id=user_id,
+                full_name=full_name,
+                pharmacy_name=pharmacy_name,
+                primary_counter=primary_counter,
+                plan_type=plan_type,
+                extra_settings=extra_settings,
+            )
+        except Exception as exc:
+            logger.warning("Onboarding vector indexing failed: %s", exc)
+
+    return {
+        "status": "success" if memory.is_available else "skipped",
+        "org_id": org_id,
+        "user_id": user_id,
+        "correlation_id": correlation_id,
+    }
+
+
 # ── 4. Transactional Notification / Email Dispatch Task ──────────────────────
 
 @_task_wrapper(name="app.workers.tasks.send_email_notification_task")

@@ -126,6 +126,22 @@ def _build_agent_response(
     rag_start = time.perf_counter()
     set_db_session(db, org_id=org_id)
 
+    from app.infrastructure.database.models import User as UserModel, Organization as OrgModel, Item as ItemModel
+
+    # Fetch admin and organization context
+    admin_user = db.query(UserModel).filter(UserModel.id == user_id).first() if user_id else None
+    org = db.query(OrgModel).filter(OrgModel.id == org_id).first() if org_id else None
+
+    admin_name = (admin_user.full_name or admin_user.username) if admin_user else "Store Admin"
+    pharmacy_name = org.name if org else "Pharmacy & Medical Store"
+    primary_counter = (org.settings or {}).get("primary_counter_name", "Main Market Counter") if org else "Main Counter"
+
+    # Check if this pharmacy currently has any items/inventory in DB
+    has_inventory = (
+        db.query(ItemModel).filter(ItemModel.org_id == org_id).count() > 0
+        if org_id
+        else True
+    )
 
     # Stage 1: Vector Retrieval Timing
     past_context, vector_retrieval_ms = _get_vector_context(
@@ -134,7 +150,6 @@ def _build_agent_response(
     history = []
     if conversation_id:
         history = _get_conversation_history(db, conversation_id, limit=6)
-
 
     # ── Try LLM agent first ────────────────────────────────────────────
     llm_inference_ms = 0.0
@@ -145,6 +160,10 @@ def _build_agent_response(
                 question=question,
                 conversation_history=history,
                 vector_context=past_context,
+                admin_name=admin_name,
+                pharmacy_name=pharmacy_name,
+                primary_counter=primary_counter,
+                has_inventory=has_inventory,
             )
             llm_inference_ms = (time.perf_counter() - llm_t0) * 1000
             total_rag_ms = (time.perf_counter() - rag_start) * 1000
@@ -171,7 +190,13 @@ def _build_agent_response(
 
     # ── Rule-based fallback ────────────────────────────────────────────
     total_rag_ms = (time.perf_counter() - rag_start) * 1000
-    res = _rule_based_response(question, past_context)
+    res = _rule_based_response(
+        question=question,
+        past_context=past_context,
+        admin_name=admin_name,
+        pharmacy_name=pharmacy_name,
+        has_inventory=has_inventory,
+    )
     res["timings"] = {
         "vector_retrieval_ms": round(vector_retrieval_ms, 2),
         "llm_inference_ms": 0.0,
@@ -180,12 +205,51 @@ def _build_agent_response(
     return res
 
 
+def _rule_based_response(
+    question: str,
+    past_context: str = "",
+    admin_name: str = "Store Admin",
+    pharmacy_name: str = "your pharmacy store",
+    has_inventory: bool = True,
+) -> dict:
+    """Intelligent fallback when LLM is unavailable or for conversational greetings."""
+    question_lower = question.lower().strip()
 
+    # 1. Conversational greetings & identity questions
+    if _is_greeting(question) or any(w in question_lower for w in ["who are you", "what can you do", "assistant"]):
+        if not has_inventory:
+            msg = (
+                f"Hello {admin_name}! Welcome to InvIQ for {pharmacy_name}.\n\n"
+                f"I am your dedicated personal inventory intelligence copilot. "
+                f"You are currently all set up with your store workspace. Since you haven't added any medicine stock or uploaded invoices yet, "
+                f"your stock dashboard is currently at zero.\n\n"
+                f"To get started, you can:\n"
+                f"• Add medicines and batches in the Inventory section\n"
+                f"• Upload supplier invoices in Suppliers & Vendors\n"
+                f"• Configure your retail counter locations in Store & Branches\n\n"
+                f"How can I help you set up your pharmacy today?"
+            )
+        else:
+            msg = (
+                f"Hello {admin_name}! I am your personal inventory assistant for {pharmacy_name}. "
+                f"I'm monitoring your stock levels, near-expiry alerts, and reorder thresholds in real time. "
+                f"What would you like to check today?"
+            )
+        return {"success": True, "response": msg, "question": question}
 
-def _rule_based_response(question: str, past_context: str = "") -> dict:
-    """Keyword-matching fallback when LLM is unavailable."""
-    question_lower = question.lower()
+    # 2. If empty inventory, respond cleanly without confusing errors
+    if not has_inventory:
+        return {
+            "success": True,
+            "response": (
+                f"No medicine stock records found for {pharmacy_name} yet. "
+                f"Once you add inventory items or import supplier invoices, I will track stock health, "
+                f"critical shortages, and reorder suggestions here in real time."
+            ),
+            "question": question,
+        }
 
+    # 3. Keyword matching for existing inventory
     if any(k in question_lower for k in ["trend", "usage", "consumption"]):
         result = get_consumption_trends.invoke({})
         return _format_result("Consumption trend summary", result, question, past_context)
@@ -289,6 +353,9 @@ def chat_query(
 ):
     if not chat_request.question or len(chat_request.question.strip()) < 3:
         raise ValidationError("Question must be at least 3 characters")
+
+    if current_user.role not in ["super_admin", "admin"]:
+        raise AuthorizationError("The AI Assistant is reserved for Pharmacy Administrators and Store Owners.")
 
     # Non-super_admins must be assigned to an organization
     if current_user.role != "super_admin" and current_user.org_id is None:
