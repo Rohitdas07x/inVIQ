@@ -180,19 +180,40 @@ export function AuthProvider({ children }) {
     // ── Login (Google OAuth) ───────────────────────────────────────────────
     const loginWithGoogle = useCallback(async (idToken) => {
         const response = await api.post('/auth/google-auth', { id_token: idToken });
-        const { access_token } = response.data.data;
+        const data = response?.data?.data || response?.data || {};
+        const accessToken = data.access_token;
+        const apiUser = data.user;
 
-        setAuthToken(access_token);
-
-        const payload = decodeJwt(access_token);
-        const userData = {
-            id: payload.sub,
-            username: payload.username,
-            role: payload.role,
-            org_id: payload.org_id,
-        };
-        setUser(userData);
-        return userData;
+        if (accessToken) {
+            setAuthToken(accessToken);
+            const payload = decodeJwt(accessToken) || {};
+            const userData = {
+                id: payload.sub || apiUser?.id,
+                username: payload.username || apiUser?.username,
+                role: payload.role || apiUser?.role,
+                org_id: payload.org_id || apiUser?.org_id,
+                organization_name: apiUser?.organization_name,
+                email: apiUser?.email,
+                full_name: apiUser?.full_name,
+                location_ids: apiUser?.location_ids || [],
+            };
+            setUser(userData);
+            return userData;
+        } else if (apiUser) {
+            const userData = {
+                id: apiUser.id,
+                username: apiUser.username,
+                role: apiUser.role,
+                org_id: apiUser.org_id,
+                organization_name: apiUser.organization_name,
+                email: apiUser.email,
+                full_name: apiUser.full_name,
+                location_ids: apiUser.location_ids || [],
+            };
+            setUser(userData);
+            return userData;
+        }
+        return data;
     }, []);
 
     // ── Logout ─────────────────────────────────────────────────────────────
@@ -208,6 +229,13 @@ export function AuthProvider({ children }) {
     }, []);
 
 
+    const updateUser = useCallback((updatedFields) => {
+        setUser((prev) => {
+            if (!prev) return null;
+            return { ...prev, ...updatedFields };
+        });
+    }, []);
+
     // ── Role helpers ───────────────────────────────────────────────────────
     const isAdmin = user?.role === 'admin';
     const isManager = user?.role === 'manager' || isAdmin;
@@ -219,6 +247,7 @@ export function AuthProvider({ children }) {
         login,
         loginWithGoogle,
         logout,
+        updateUser,
         isAdmin,
         isManager,
         isStaff,

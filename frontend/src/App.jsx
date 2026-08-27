@@ -13,7 +13,6 @@ import Chatbot from './pages/admin/Chatbot';
 import Requisitions from './pages/admin/Requisitions';
 import UserManagement from './pages/admin/UserManagement';
 import SupplierManagement from './pages/admin/SupplierManagement';
-import AuditLogs from './pages/admin/AuditLogs';
 import Reports from './pages/admin/Reports';
 import OrganizationSettings from './pages/admin/OrganizationSettings';
 import BillingCounter from './pages/staff/BillingCounter';
@@ -112,7 +111,6 @@ function AppContent() {
             <Route element={<ProtectedRoute requiredRole="admin" />}>
               <Route path="suppliers"       element={<SupplierManagement />} />
               <Route path="users"           element={<UserManagement />} />
-              <Route path="audit-logs"      element={<AuditLogs />} />
               <Route path="reports"         element={<Reports />} />
             </Route>
           </Route>

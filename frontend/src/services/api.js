@@ -54,6 +54,8 @@ export const auth = {
     deactivateUser: (id) => api.put(`/auth/users/${id}/deactivate`),
     resetPassword: (id, data) => api.post(`/auth/users/${id}/reset-password`, data),
     updateRole: (id, data) => api.put(`/auth/users/${id}/role`, data),
+    getProfile: () => api.get('/auth/me'),
+    updateProfile: (data) => api.patch('/auth/me', data),
     changePassword: (data) => api.post('/auth/change-password', data),
     refresh: (data) => api.post('/auth/refresh', data),
     requestPasswordReset: (data) => api.post('/auth/request-password-reset', data),
@@ -97,6 +99,7 @@ export const chat = {
     query: (data) => api.post('/chat/query', data),
     getSessions: () => api.get('/chat/sessions'),
     getHistory: (id) => api.get(`/chat/history/${id}`),
+    deleteHistory: (id) => api.delete(`/chat/history/${id}`),
     transcribe: (audioBlob) => {
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.wav');

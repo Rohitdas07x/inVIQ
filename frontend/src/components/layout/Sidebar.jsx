@@ -8,6 +8,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useGuest } from '../../context/GuestContext';
 
+import AdminProfileModal from '../ui/AdminProfileModal';
+
 const ROLE_LABELS = {
     super_admin: { label: 'Super Admin', color: 'bg-purple-900 text-purple-300' },
     admin:       { label: 'Admin',       color: 'bg-red-900 text-red-300' },
@@ -26,105 +28,96 @@ const ALL_NAV_ITEMS = [
     { path: '/admin/inventory',         label: 'Inventory',           icon: Package,          roles: ['super_admin', 'admin', 'guest'] },
     { path: '/admin/stock-acquisition', label: 'Stock Acquisition',   icon: Upload,           roles: ['super_admin', 'admin', 'vendor', 'guest'] },
     { path: '/admin/requisitions',      label: 'Requisitions',        icon: ClipboardList,    roles: ['super_admin', 'admin', 'guest'] },
-    { path: '/admin/chat',              label: 'AI Assistant',        icon: MessageSquare,    roles: ['super_admin', 'admin', 'staff', 'guest'] },
+    { path: '/admin/chat',              label: 'AI Assistant',        icon: MessageSquare,    roles: ['super_admin', 'admin'] },
     { path: '/admin/suppliers',         label: 'Suppliers & Vendors', icon: Truck,            roles: ['super_admin', 'admin'] },
     { path: '/admin/users',             label: 'Users & Staff',       icon: Users,            roles: ['super_admin', 'admin'] },
     { path: '/admin/organization',      label: 'Store & Branches',    icon: Building2,        roles: ['super_admin', 'admin'] },
-    { path: '/admin/audit-logs',        label: 'Audit Logs',          icon: FileText,         roles: ['super_admin', 'admin'] },
     { path: '/admin/reports',           label: 'Reports',             icon: FileText,         roles: ['super_admin', 'admin'] },
 
     // ── Staff Portal shortcut ──────────────────────────────────────────────
     { path: '/staff',                   label: 'Staff Portal',        icon: Users,            roles: ['super_admin', 'admin', 'staff'], divider: true },
 ];
 
-
-
-
-
 const Sidebar = () => {
     const { user, logout } = useAuth();
     const { isGuest, showAuthModal } = useGuest();
-    const navigate = useNavigate();
     const [collapsed, setCollapsed] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
+    const [showProfileModal, setShowProfileModal] = useState(false);
+    const navigate = useNavigate();
 
-    // Use a virtual "guest" role for guests so the nav item filter works cleanly
-    const role = user?.role || 'guest';
-
-    // Filter nav items by current user role
-    const navItems = ALL_NAV_ITEMS.filter(item => item.roles.includes(role));
+    const roleInfo = user?.role ? ROLE_LABELS[user.role] : null;
 
     const handleLogout = async () => {
         await logout();
-        navigate('/signin', { replace: true });
+        navigate('/signin');
     };
 
-    const roleInfo = ROLE_LABELS[role];
-
-    // Portal label based on role (guests see "Demo Preview")
-    const portalLabel = {
-        super_admin: 'Super Admin Portal',
-        admin:       'Admin Portal',
-        manager:     'Manager Portal',
-        staff:       'Staff Portal',
-        vendor:      'Vendor Portal',
-        guest:       'Demo Preview',
-    }[role] || 'Portal';
+    const displayName = user?.full_name || user?.username || 'Admin';
 
     return (
-        <div className={`h-screen bg-white border-r border-slate-200 flex flex-col p-3 shrink-0 transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
-            {/* Brand Header with Toggle Bar on Right & Logo Expand on Click */}
-            <div className="mb-6 px-2 py-2 flex items-center justify-between min-h-[48px]">
-                {!collapsed ? (
-                    <>
-                        <div className="flex items-center gap-2.5 min-w-0">
-                            <img src="/logo.png" alt="InvIQ Logo" className="w-8 h-8 object-contain shrink-0" />
-                            <div className="flex flex-col justify-center min-w-0">
-                                <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none">InvIQ</h1>
-                                <p className="text-[10px] text-slate-500 font-medium mt-1 uppercase tracking-wider truncate">{portalLabel}</p>
-                            </div>
+        <aside
+            className={`h-screen sticky top-0 flex flex-col bg-white border-r border-slate-200 text-slate-800 transition-all duration-300 z-40 ${
+                collapsed ? 'w-18 p-3' : 'w-64 p-4'
+            }`}
+        >
+            {/* ── Brand / Header ────────────────────────────────────────── */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                {!collapsed && (
+                    <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className="w-8 h-8 bg-slate-900 flex items-center justify-center font-bold text-white shrink-0">
+                            IQ
                         </div>
-                        <button
-                            onClick={() => setCollapsed(true)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
-                            title="Collapse Sidebar"
-                            aria-label="Collapse Sidebar"
-                        >
-                            <PanelLeftClose size={18} />
-                        </button>
-                    </>
-                ) : (
-                    <div className="w-full flex justify-center items-center">
-                        <button
-                            onClick={() => setCollapsed(false)}
-                            className="group p-2 rounded-xl hover:bg-slate-100 transition-all cursor-pointer flex items-center justify-center"
-                            title="Click Logo to Expand Sidebar"
-                            aria-label="Expand Sidebar"
-                        >
-                            <img
-                                src="/logo.png"
-                                alt="InvIQ Logo"
-                                className="w-8 h-8 object-contain group-hover:scale-110 transition-transform"
-                            />
-                        </button>
+                        <div className="min-w-0">
+                            <span className="font-black text-slate-900 tracking-tight text-base block leading-none">
+                                InvIQ
+                            </span>
+                            <span className="text-[10px] text-slate-600 block mt-0.5 tracking-wider font-semibold">
+                                SMART INVENTORY
+                            </span>
+                        </div>
                     </div>
                 )}
+
+                {collapsed && (
+                    <div className="w-8 h-8 bg-slate-900 flex items-center justify-center font-bold text-white mx-auto">
+                        IQ
+                    </div>
+                )}
+
+                {/* Collapse button */}
+                <button
+                    onClick={() => setCollapsed(!collapsed)}
+                    className={`text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1.5 transition-colors ${collapsed ? 'mx-auto mt-2' : ''}`}
+                    title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                >
+                    <PanelLeftClose
+                        size={16}
+                        className={`transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
+                    />
+                </button>
             </div>
 
-            {/* Nav links */}
-            <nav className="flex-1 space-y-1 overflow-y-auto">
-                {navItems.map((item, idx) => (
+            {/* ── Navigation Items ──────────────────────────────────────── */}
+            <nav className="mt-4 flex-1 space-y-1 overflow-y-auto">
+                {ALL_NAV_ITEMS.map((item, idx) => (
                     <React.Fragment key={item.path}>
-                        {item.divider && idx > 0 && !collapsed && (
-                            <div className="border-t border-slate-100 my-2" />
+                        {item.divider && !collapsed && (
+                            <div className="pt-3 pb-1">
+                                <p className="px-3 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                                    Operations
+                                </p>
+                            </div>
                         )}
                         <NavLink
                             to={item.path}
                             title={collapsed ? item.label : undefined}
                             className={({ isActive }) =>
-                                `flex items-center ${collapsed ? 'justify-center px-2' : 'space-x-3 px-3'} py-2.5 rounded-xl transition-all duration-200 text-sm font-medium ${isActive
-                                    ? 'bg-blue-50 text-blue-600 shadow-xs'
-                                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                                `flex items-center ${collapsed ? 'justify-center px-2' : 'space-x-3 px-3'} py-2.5 transition-colors text-sm font-medium ${
+                                    isActive
+                                        ? 'bg-slate-100 text-slate-900 border-l-2 border-slate-900 font-semibold'
+                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                                 }`
                             }
                         >
@@ -149,15 +142,24 @@ const Sidebar = () => {
 
             {/* Bottom section */}
             <div className="mt-auto pt-3 border-t border-slate-100 space-y-2">
-                {/* Authenticated user info */}
+                {/* Authenticated user info — Clickable to edit profile */}
                 {user && (
-                    <div className={`p-2.5 bg-slate-50 border border-slate-200 flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
-                        <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center text-xs font-bold uppercase shrink-0" title={collapsed ? user.username : undefined}>
-                            {user.username?.[0] || '?'}
+                    <div 
+                        onClick={() => setShowProfileModal(true)}
+                        title={collapsed ? `${displayName} (Click to edit profile)` : "Click to edit your profile"}
+                        className={`p-2.5 bg-slate-50 border border-slate-200 flex items-center cursor-pointer hover:bg-slate-100 hover:border-slate-300 transition-all group ${collapsed ? 'justify-center' : 'gap-3'}`}
+                    >
+                        <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center text-xs font-bold uppercase shrink-0" title={collapsed ? displayName : undefined}>
+                            {displayName[0] || 'A'}
                         </div>
                         {!collapsed && (
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-slate-900 truncate">{user.username}</p>
+                                <div className="flex items-center justify-between">
+                                    <p className="text-xs font-bold text-slate-900 truncate">
+                                        {displayName}
+                                    </p>
+                                    <span className="text-[10px] text-slate-400 group-hover:text-slate-700 font-medium ml-1">Edit</span>
+                                </div>
                                 {roleInfo && (
                                     <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 font-bold ${roleInfo.color}`}>
                                         {roleInfo.label}
@@ -249,7 +251,13 @@ const Sidebar = () => {
                     </div>
                 </div>
             )}
-        </div>
+
+            {/* Admin Profile Modal */}
+            <AdminProfileModal
+                isOpen={showProfileModal}
+                onClose={() => setShowProfileModal(false)}
+            />
+        </aside>
     );
 };
 

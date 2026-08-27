@@ -22,21 +22,28 @@ export const LightSignIn = () => {
   useEffect(() => {
     if (window.location.hash) {
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const accessToken = hashParams.get("access_token");
-      if (accessToken) {
+      const token = hashParams.get("access_token") || hashParams.get("id_token");
+      if (token) {
+        window.history.replaceState(null, "", window.location.pathname);
         setGoogleLoading(true);
-        loginWithGoogle(accessToken)
-          .then(() => {
-            navigate(from, { replace: true });
+        loginWithGoogle(token)
+          .then((userData) => {
+            const role = userData?.role || "admin";
+            if (role === "super_admin") {
+              navigate("/super-admin", { replace: true });
+            } else if (role === "staff" || role === "vendor") {
+              navigate("/staff", { replace: true });
+            } else {
+              navigate(from || "/dashboard", { replace: true });
+            }
           })
           .catch((err) => {
             const msg =
               err?.response?.data?.detail ||
+              err?.response?.data?.error?.message ||
               err?.response?.data?.message ||
               "Google sign-in failed.";
             setError(msg);
-          })
-          .finally(() => {
             setGoogleLoading(false);
           });
       }

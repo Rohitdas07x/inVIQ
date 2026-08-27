@@ -8,25 +8,33 @@ import {
   Sparkles,
   Bot,
   User,
-  TrendingUp,
-  BrainCircuit,
-  Lock,
+  History,
+  Plus,
+  Trash2,
+  X,
+  Loader2,
+  Clock,
+  ChevronRight,
+  MessageSquare,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { chat } from "../../services/api";
 import { useGuest } from "../../context/GuestContext";
+import { useAuth } from "../../context/AuthContext";
 
 export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
   const { isGuest, showAuthModal } = useGuest();
+  const { user } = useAuth();
   const isPreviewMode = isPreview || isGuest;
 
   const [inputValue, setInputValue] = useState("");
-  const [searchEnabled, setSearchEnabled] = useState(false);
-  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
-  const [reasonEnabled, setReasonEnabled] = useState(false);
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -34,37 +42,100 @@ export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const handleInputClick = () => {
-    if (isPreviewMode) {
-      showAuthModal("Sign in to interact with InvIQ AI Assistant.");
+  // Load chat sessions when opening history
+  const loadSessions = async () => {
+    if (isPreviewMode) return;
+    setSessionsLoading(true);
+    try {
+      const res = await chat.getSessions();
+      if (res?.data?.success && Array.isArray(res.data.sessions)) {
+        setSessions(res.data.sessions);
+      }
+    } catch {
+      // silent fail
+    } finally {
+      setSessionsLoading(false);
     }
   };
 
-  const handleSendMessage = async () => {
+  const toggleHistory = () => {
+    const nextState = !isHistoryOpen;
+    setIsHistoryOpen(nextState);
+    if (nextState) {
+      loadSessions();
+    }
+  };
+
+  const handleStartNewChat = () => {
+    setConversationId(null);
+    setMessages([]);
+    setIsHistoryOpen(false);
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  const handleSelectSession = async (sessionId) => {
+    if (sessionId === conversationId) {
+      setIsHistoryOpen(false);
+      return;
+    }
+    setIsLoading(true);
+    setIsHistoryOpen(false);
+    try {
+      const res = await chat.getHistory(sessionId);
+      if (res?.data?.success && Array.isArray(res.data.messages)) {
+        setConversationId(sessionId);
+        setMessages(res.data.messages);
+      }
+    } catch {
+      // silent fail
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteSession = async (e, sessionId) => {
+    e.stopPropagation();
+    try {
+      await chat.deleteHistory(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (conversationId === sessionId) {
+        handleStartNewChat();
+      }
+    } catch {
+      // silent fail
+    }
+  };
+
+  const handleInputClick = () => {
     if (isPreviewMode) {
-      showAuthModal("Sign in to interact with InvIQ AI Assistant.");
+      showAuthModal("Sign in as Admin to interact with InvIQ AI Assistant.");
+    }
+  };
+
+  const handleSendMessage = async (textToSend) => {
+    if (isPreviewMode) {
+      showAuthModal("Sign in as Admin to interact with InvIQ AI Assistant.");
       return;
     }
 
-    if (!inputValue.trim() || isLoading) return;
+    const query = (textToSend || inputValue).trim();
+    if (!query || isLoading) return;
 
-    const userQuery = inputValue.trim();
-    const newMsg = { role: "user", content: userQuery };
-    setMessages((prev) => [...prev, newMsg]);
+    const userMsg = { role: "user", content: query };
+    setMessages((prev) => [...prev, userMsg]);
     setInputValue("");
     setIsLoading(true);
 
     if (onQuerySubmit) {
-      onQuerySubmit(userQuery);
+      onQuerySubmit(query);
     }
 
     try {
       const res = await chat.query({
-        question: userQuery,
+        question: query,
         conversation_id: conversationId,
-        search_enabled: searchEnabled,
-        deep_research: deepResearchEnabled,
-        reason_mode: reasonEnabled,
       });
 
       if (res?.data?.success) {
@@ -76,22 +147,20 @@ export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
           setConversationId(res.data.conversation_id);
         }
       } else {
-        // Fallback intelligent simulation
+        const errDetail = res?.data?.detail || res?.data?.error?.message || "Sorry, I could not process your query.";
         setMessages((prev) => [
           ...prev,
-          {
-            role: "assistant",
-            content: `Analysis complete for: "${userQuery}". Inventory records show 4 locations active with 960 healthy batches and 12 items flagged for recommended restocking. All cold-chain vaccines are strictly compliant within 2°C–8°C parameters.`,
-          },
+          { role: "assistant", content: errDetail },
         ]);
       }
-    } catch {
+    } catch (err) {
+      const errMsg =
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        "I couldn't reach the AI service right now. Please verify that your question is about pharmacy inventory.";
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: `Real-time query completed: "${userQuery}". Current warehouse stock levels and batch expiries are within standard operational thresholds. Requisition #REQ-2026-081 is pending manager sign-off.`,
-        },
+        { role: "assistant", content: errMsg },
       ]);
     } finally {
       setIsLoading(false);
@@ -111,146 +180,171 @@ export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
     }
   };
 
+  const adminName = user?.full_name || user?.username || "Store Admin";
+  const pharmacyName = user?.organization_name || "your pharmacy store";
+
   return (
-    <div className="w-full h-full flex flex-col justify-between bg-white p-6 sm:p-8 font-sans overflow-hidden border border-slate-200 rounded-none text-slate-900">
-      {/* Top Header & Identity */}
-      <div className={`shrink-0 flex flex-col items-center transition-all ${messages.length > 0 ? "mb-4" : "my-auto"}`}>
-        {/* Black & Grey Animated Brand Identity Logo */}
-        <div className="mb-4 w-16 h-16 sm:w-20 sm:h-20 relative">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 200 200"
-            width="100%"
-            height="100%"
-            className="w-full h-full"
-          >
-            <g clipPath="url(#cs_clip_1_ellipse-12)">
-              <mask
-                id="cs_mask_1_ellipse-12"
-                style={{ maskType: "alpha" }}
-                width="200"
-                height="200"
-                x="0"
-                y="0"
-                maskUnits="userSpaceOnUse"
-              >
-                <path
-                  fill="#fff"
-                  fillRule="evenodd"
-                  d="M100 150c27.614 0 50-22.386 50-50s-22.386-50-50-50-50 22.386-50 50 22.386 50 50 50zm0 50c55.228 0 100-44.772 100-100S155.228 0 100 0 0 44.772 0 100s44.772 100 100 100z"
-                  clipRule="evenodd"
-                ></path>
-              </mask>
-              <g mask="url(#cs_mask_1_ellipse-12)">
-                <path fill="#fff" d="M200 0H0v200h200V0z"></path>
-                <path
-                  fill="#1e293b"
-                  fillOpacity="0.35"
-                  d="M200 0H0v200h200V0z"
-                ></path>
-                <g
-                  filter="url(#filter0_f_844_2811)"
-                  className="animate-gradient"
-                >
-                  <path fill="#0f172a" d="M110 32H18v68h92V32z"></path>
-                  <path fill="#334155" d="M188-24H15v98h173v-98z"></path>
-                  <path fill="#475569" d="M175 70H5v156h170V70z"></path>
-                  <path fill="#64748b" d="M230 51H100v103h130V51z"></path>
-                </g>
-              </g>
-            </g>
-            <defs>
-              <filter
-                id="filter0_f_844_2811"
-                width="385"
-                height="410"
-                x="-75"
-                y="-104"
-                colorInterpolationFilters="sRGB"
-                filterUnits="userSpaceOnUse"
-              >
-                <feFlood floodOpacity="0" result="BackgroundImageFix"></feFlood>
-                <feBlend
-                  in="SourceGraphic"
-                  in2="BackgroundImageFix"
-                  result="shape"
-                ></feBlend>
-                <feGaussianBlur
-                  result="effect1_foregroundBlur_844_2811"
-                  stdDeviation="40"
-                ></feGaussianBlur>
-              </filter>
-              <clipPath id="cs_clip_1_ellipse-12">
-                <path fill="#fff" d="M0 200V200H0z"></path>
-              </clipPath>
-            </defs>
-            <g
-              style={{ mixBlendMode: "overlay" }}
-              mask="url(#cs_mask_1_ellipse-12)"
-            >
-              <path
-                fill="gray"
-                stroke="transparent"
-                d="M200 0H0v200h200V0z"
-                filter="url(#cs_noise_1_ellipse-12)"
-              ></path>
-            </g>
-            <defs>
-              <filter
-                id="cs_noise_1_ellipse-12"
-                width="100%"
-                height="100%"
-                x="0%"
-                y="0%"
-                filterUnits="objectBoundingBox"
-              >
-                <feTurbulence
-                  baseFrequency="0.6"
-                  numOctaves="5"
-                  result="out1"
-                  seed="4"
-                ></feTurbulence>
-                <feComposite
-                  in="out1"
-                  in2="SourceGraphic"
-                  operator="in"
-                  result="out2"
-                ></feComposite>
-                <feBlend
-                  in="SourceGraphic"
-                  in2="out2"
-                  mode="overlay"
-                  result="out3"
-                ></feBlend>
-              </filter>
-            </defs>
-          </svg>
+    <div className="relative w-full h-full flex flex-col justify-between bg-white p-4 sm:p-6 font-sans overflow-hidden border border-slate-200 rounded-none text-slate-900">
+      
+      {/* ── Top Header with History Button in Top Right ── */}
+      <div className="shrink-0 flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center rounded-none font-bold">
+            <Sparkles size={16} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 tracking-tight">
+              InvIQ Intelligence Copilot
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Personalized for {adminName} • {pharmacyName}
+            </p>
+          </div>
         </div>
 
-        {/* Black & Grey Business Heading */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="flex flex-col items-center text-center"
-        >
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-800 text-xs font-semibold mb-2 border border-slate-300 rounded-none">
-            <Sparkles className="w-3.5 h-3.5 text-slate-700" />
-            <span>Smart Inventory & Supply Chain Intelligence</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-950 mb-2 tracking-tight">
-            InvIQ Intelligence Assistant
-          </h1>
-          <p className="text-slate-500 text-sm max-w-xl leading-relaxed font-normal">
-            Ask about stock replenishment, cold-chain temperature thresholds, batch tracking, or procurement.
-          </p>
-        </motion.div>
+        {/* History Toggle Button */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleStartNewChat}
+            title="Start New Chat"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-none hover:bg-slate-50 transition"
+          >
+            <Plus size={13} />
+            <span className="hidden sm:inline">New Chat</span>
+          </button>
+          <button
+            type="button"
+            onClick={toggleHistory}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border rounded-none transition ${
+              isHistoryOpen
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200"
+            }`}
+          >
+            <History size={13} />
+            <span>History</span>
+          </button>
+        </div>
       </div>
 
-      {/* Center Interactive Chat Messages Stream */}
-      {messages.length > 0 && (
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-slate-50/80 border border-slate-200 space-y-4 mb-4 rounded-none">
+      {/* ── Slide-over History Drawer ── */}
+      <AnimatePresence>
+        {isHistoryOpen && (
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.2 }}
+            className="absolute top-0 right-0 w-80 max-w-full h-full bg-white border-l border-slate-200 z-40 flex flex-col shadow-xl"
+          >
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Clock size={15} className="text-slate-700" />
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Chat History
+                </span>
+              </div>
+              <button
+                onClick={() => setIsHistoryOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-none"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-slate-100 bg-white">
+              <button
+                onClick={handleStartNewChat}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-900 text-white text-xs font-bold rounded-none hover:bg-slate-800 transition"
+              >
+                <Plus size={14} />
+                <span>+ Start Fresh Conversation</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 divide-y divide-slate-50">
+              {sessionsLoading ? (
+                <div className="flex items-center justify-center py-8 text-xs text-slate-400 gap-2">
+                  <Loader2 size={14} className="animate-spin text-slate-700" />
+                  <span>Loading conversations…</span>
+                </div>
+              ) : sessions.length === 0 ? (
+                <div className="text-center py-10 px-4 text-slate-400 text-xs">
+                  <MessageSquare size={24} className="mx-auto mb-2 opacity-40" />
+                  <p>No past chat sessions found.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Start chatting to build your memory.</p>
+                </div>
+              ) : (
+                sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => handleSelectSession(s.id)}
+                    className={`group w-full p-2.5 text-left text-xs cursor-pointer border rounded-none transition flex items-start justify-between gap-2 ${
+                      conversationId === s.id
+                        ? "bg-slate-100 border-slate-800 border-l-4 border-l-slate-900"
+                        : "bg-white border-transparent hover:bg-slate-50 hover:border-slate-200"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-900 truncate">
+                        {s.preview || "Chat Session"}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {s.message_count} messages
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteSession(e, s.id)}
+                      title="Delete chat"
+                      className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-600 p-1 transition"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Main Chat Stream or Hero Greeting ── */}
+      {messages.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-4 my-auto">
+          <div className="w-14 h-14 bg-slate-900 text-white flex items-center justify-center rounded-none font-bold mb-4 shadow-sm">
+            <Bot size={28} />
+          </div>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight mb-2">
+            Welcome to InvIQ, {adminName}!
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 max-w-lg leading-relaxed mb-6 font-normal">
+            I am your personal inventory intelligence assistant for <span className="font-bold text-slate-800">{pharmacyName}</span>.
+            Ask about medicine stock levels, batch expiries, reorder recommendations, or cold-chain compliance.
+          </p>
+
+          {/* Quick Action Suggestion Pills */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-md w-full">
+            {[
+              "What is my current inventory status?",
+              "Are there any near-expiry batches?",
+              "Do I have any critical stock alerts?",
+              "How do I upload supplier invoices?",
+            ].map((q) => (
+              <button
+                key={q}
+                onClick={() => handleSendMessage(q)}
+                className="p-2.5 text-left text-xs bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-800 rounded-none transition flex items-center justify-between group"
+              >
+                <span className="truncate">{q}</span>
+                <ChevronRight size={13} className="text-slate-400 group-hover:text-slate-800 shrink-0 ml-1" />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-slate-50/70 border border-slate-200 space-y-4 mb-4 rounded-none">
           {messages.map((m, idx) => (
             <div
               key={idx}
@@ -259,171 +353,69 @@ export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
               }`}
             >
               {m.role !== "user" && (
-                <div className="w-8 h-8 bg-slate-900 flex items-center justify-center text-white shrink-0 rounded-none">
-                  <Bot size={16} />
+                <div className="w-7 h-7 bg-slate-900 flex items-center justify-center text-white shrink-0 rounded-none mt-0.5">
+                  <Bot size={15} />
                 </div>
               )}
               <div
-                className={`p-4 text-sm leading-relaxed max-w-[85%] rounded-none ${
+                className={`p-3.5 text-xs sm:text-sm leading-relaxed max-w-[85%] rounded-none whitespace-pre-wrap ${
                   m.role === "user"
-                    ? "bg-slate-900 text-white"
-                    : "bg-white text-slate-900 border border-slate-300 shadow-none"
+                    ? "bg-slate-900 text-white font-medium"
+                    : "bg-white text-slate-900 border border-slate-300 shadow-none font-normal"
                 }`}
               >
                 {m.content}
               </div>
               {m.role === "user" && (
-                <div className="w-8 h-8 bg-slate-800 flex items-center justify-center text-white shrink-0 rounded-none">
-                  <User size={16} />
+                <div className="w-7 h-7 bg-slate-700 flex items-center justify-center text-white shrink-0 rounded-none mt-0.5">
+                  <User size={15} />
                 </div>
               )}
             </div>
           ))}
           {isLoading && (
             <div className="flex gap-2.5 items-center text-xs text-slate-500 italic pl-1">
-              <span className="w-2 h-2 bg-slate-900 animate-pulse rounded-none" />
-              <span>InvIQ is analyzing supply chain telemetry...</span>
+              <Loader2 size={14} className="animate-spin text-slate-800" />
+              <span>InvIQ is analyzing {pharmacyName} inventory data…</span>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
       )}
 
-      {/* Bottom Sticky Input Area - Sharp Corners, Black & Grey Palette */}
+      {/* ── Bottom Input Area (Sharp Corners, Minimal Black/Grey Palette) ── */}
       <div 
         onClick={handleInputClick}
         className="shrink-0 w-full bg-white border border-slate-300 rounded-none shadow-none overflow-hidden"
       >
-        <div className="p-4 relative">
+        <div className="p-3 relative flex items-center gap-2">
           <input
             ref={inputRef}
             type="text"
-            readOnly={isPreviewMode}
-            placeholder={
-              isPreviewMode
-                ? "Preview Mode — Sign in to interact with InvIQ AI Assistant..."
-                : "Ask about batch expiries, warehouse restock, storage temperatures..."
-            }
             value={inputValue}
-            onChange={(e) => {
-              if (!isPreviewMode) {
-                setInputValue(e.target.value);
-              }
-            }}
+            onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            className={`w-full text-slate-900 text-sm sm:text-base outline-none bg-transparent rounded-none ${
-              isPreviewMode
-                ? "cursor-pointer placeholder:text-slate-500 font-medium"
-                : "placeholder:text-slate-400"
-            }`}
+            disabled={isLoading || isPreviewMode}
+            placeholder={`Ask InvIQ about ${pharmacyName} stock, expiries, or reorders…`}
+            className="w-full bg-transparent text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none"
           />
-          {isPreviewMode && (
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-2.5 py-1 border border-slate-300 pointer-events-none">
-              <Lock size={12} className="text-slate-600" />
-              <span>Sign In Required</span>
-            </div>
-          )}
-        </div>
 
-        {/* Action Buttons: Search, Deep Audit, Reasoning, Mic, Send */}
-        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={(e) => {
-                if (isPreviewMode) {
-                  e.stopPropagation();
-                  showAuthModal("Sign in to enable search and analysis tools.");
-                  return;
-                }
-                setSearchEnabled(!searchEnabled);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-none border transition-all ${
-                searchEnabled && !isPreviewMode
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span>Search</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                if (isPreviewMode) {
-                  e.stopPropagation();
-                  showAuthModal("Sign in to run deep audit analysis.");
-                  return;
-                }
-                setDeepResearchEnabled(!deepResearchEnabled);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-none border transition-all ${
-                deepResearchEnabled && !isPreviewMode
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>Deep Audit</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                if (isPreviewMode) {
-                  e.stopPropagation();
-                  showAuthModal("Sign in to enable reasoning mode.");
-                  return;
-                }
-                setReasonEnabled(!reasonEnabled);
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-none border transition-all ${
-                reasonEnabled && !isPreviewMode
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <BrainCircuit className="w-3.5 h-3.5" />
-              <span>Reasoning</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              type="button"
-              onClick={(e) => {
-                if (isPreviewMode) {
-                  e.stopPropagation();
-                  showAuthModal("Sign in to use voice queries.");
-                  return;
-                }
-                setInputValue("Report stock discrepancy for Paracetamol IV 100ml batch PCM-2026-02");
-              }}
-              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 rounded-none transition-colors"
-              title={isPreviewMode ? "Sign in to use voice STT" : "Voice input simulated sample"}
-            >
-              <Mic className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSendMessage();
-              }}
-              disabled={!isPreviewMode && (!inputValue.trim() || isLoading)}
-              className={`px-3.5 py-1.5 flex items-center justify-center rounded-none transition-all ${
-                isPreviewMode
-                  ? "bg-slate-900 text-white hover:bg-black cursor-pointer"
-                  : inputValue.trim() && !isLoading
-                  ? "bg-slate-900 text-white hover:bg-black"
-                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
-              }`}
-              title={isPreviewMode ? "Sign in to send query" : "Send query"}
-            >
-              <ArrowUp className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => handleSendMessage()}
+            disabled={!inputValue.trim() || isLoading || isPreviewMode}
+            className="p-2 bg-slate-900 hover:bg-slate-800 text-white rounded-none disabled:opacity-30 disabled:pointer-events-none transition shrink-0"
+            title="Send Message"
+          >
+            {isLoading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <ArrowUp size={16} />
+            )}
+          </button>
         </div>
       </div>
+
     </div>
   );
 }

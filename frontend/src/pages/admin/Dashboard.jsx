@@ -185,20 +185,20 @@ const Dashboard = () => {
                 <div className="p-6 flex flex-col justify-between">
                     <div>
                         <p className="text-xs font-semibold text-slate-500 tracking-wider">Active Pharmaceutical SKUs</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{totalItems || 1300}</h3>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{totalItems}</h3>
                     </div>
-                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 4.2% <span className="text-slate-400 ml-1">vs last month</span>
+                    <div className="mt-4 flex items-center text-xs font-medium text-slate-400">
+                        <span>No data yet</span>
                     </div>
                 </div>
 
                 <div className="p-6 flex flex-col justify-between">
                     <div>
                         <p className="text-xs font-semibold text-slate-500 tracking-wider">Total Inventory Valuation</p>
-                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">$184,290</h3>
+                        <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">₹0</h3>
                     </div>
-                    <div className="mt-4 flex items-center text-xs font-medium text-emerald-600">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 12.4% <span className="text-slate-400 ml-1">asset value</span>
+                    <div className="mt-4 flex items-center text-xs font-medium text-slate-400">
+                        <span>No inventory added</span>
                     </div>
                 </div>
 
@@ -206,11 +206,11 @@ const Dashboard = () => {
                     <div>
                         <p className="text-xs font-semibold text-slate-500 tracking-wider">Stock Fulfillment Rate</p>
                         <h3 className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">
-                            {totalItems > 0 ? (((totalItems - criticalItems) / totalItems) * 100).toFixed(1) + '%' : '98.2%'}
+                            {totalItems > 0 ? (((totalItems - criticalItems) / totalItems) * 100).toFixed(1) + '%' : '—'}
                         </h3>
                     </div>
-                    <div className="mt-4 flex items-center text-emerald-600 text-xs font-medium">
-                        <ArrowUpRight size={14} className="mr-0.5" /> 0.4% <span className="text-slate-400 ml-1">fulfillment</span>
+                    <div className="mt-4 flex items-center text-slate-400 text-xs font-medium">
+                        <span>Add stock to track</span>
                     </div>
                 </div>
 
@@ -231,9 +231,11 @@ const Dashboard = () => {
                 <div className="p-6">
                     <div className="flex items-center gap-2 mb-1">
                         <h3 className="text-base font-bold text-slate-900">Inventory Health Breakdown</h3>
-                        <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
-                            <ArrowUpRight size={12} /> 94.4% Healthy
-                        </span>
+                        {totalItems > 0 && (
+                            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-none flex items-center gap-0.5">
+                                <ArrowUpRight size={12} /> {totalItems > 0 ? (((totalItems - criticalItems) / totalItems) * 100).toFixed(1) : 0}% Healthy
+                            </span>
+                        )}
                     </div>
                     <p className="text-xs text-slate-500 mb-6">Real-time batch stock status across warehouse locations.</p>
                     <div className="h-64">
@@ -309,51 +311,8 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Location Stock Levels & Top Critical Items */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 bg-white border border-slate-200 rounded-none shadow-none">
-                {/* Location Stock Levels with Multi-Color Bars & Non-Overlapping Labels */}
-                <div className="p-6">
-                    <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-base font-bold text-slate-900">Stock Volume by Location</h3>
-                        <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 border border-slate-200">
-                            {location_stock.length} Facilities
-                        </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mb-4">Warehouse and facility distribution.</p>
-                    <div className="h-72">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                                data={location_stock}
-                                margin={{ top: 10, right: 10, left: -10, bottom: 45 }}
-                            >
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                                <XAxis
-                                    dataKey="name"
-                                    tick={{ fontSize: 10 }}
-                                    interval={0}
-                                    angle={-25}
-                                    textAnchor="end"
-                                    height={50}
-                                    tickFormatter={(str) => (str.length > 15 ? str.substring(0, 13) + '…' : str)}
-                                />
-                                <YAxis tick={{ fontSize: 11 }} />
-                                <Tooltip />
-                                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                                    {location_stock.map((entry, index) => (
-                                        <Cell
-                                            key={`loc-cell-${index}`}
-                                            fill={LOCATION_COLORS[index % LOCATION_COLORS.length]}
-                                        />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-
-
-                {/* Top Critical Items */}
+            {/* Top Critical Shortages — Full Width */}
+            <div className="bg-white border border-slate-200 rounded-none shadow-none">
                 <div className="p-6">
                     <div className="flex items-center justify-between mb-4">
                         <div>
@@ -364,26 +323,25 @@ const Dashboard = () => {
                             {low_stock_items.length} Critical
                         </span>
                     </div>
-                    <div className="divide-y divide-slate-200">
+                    <div className="divide-y divide-slate-100">
                         {low_stock_items.length === 0 ? (
-                            <p className="text-slate-400 text-sm text-center py-8">No critical shortages found.</p>
+                            <p className="text-slate-400 text-sm text-center py-10">No critical shortages found.</p>
                         ) : (
-                            low_stock_items.slice(0, 4).map((item, index) => (
+                            low_stock_items.slice(0, 8).map((item, index) => (
                                 <div key={index} className="py-3 flex items-center justify-between">
                                     <div>
                                         <p className="font-semibold text-slate-900 text-sm">{item.name}</p>
                                         <p className="text-xs text-slate-400">
-                                            {item.location || 'Central Warehouse'} {item.category ? `• ${item.category}` : ''}
+                                            {item.location || 'Central Warehouse'}{item.category ? ` • ${item.category}` : ''}
                                         </p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-sm font-bold text-red-600">
                                             {item.days_remaining != null ? `${item.days_remaining}d left` : `${item.stock || item.current_stock || 0} left`}
                                         </p>
-                                        <p className="text-[11px] text-slate-400">Min: {item.min_stock || 10}</p>
+                                        <p className="text-[11px] text-slate-400">Min: {item.min_stock ?? '—'}</p>
                                     </div>
                                 </div>
-
                             ))
                         )}
                     </div>
