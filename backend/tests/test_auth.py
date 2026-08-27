@@ -260,10 +260,10 @@ class TestRBACAndTenantIsolation:
                 res3 = client.post("/api/auth/google-auth", json={"id_token": "mock-token"})
                 assert res3.status_code in [401, 403]
 
-            # 5. Successful registration creates user as STAFF (never admin)
+            # 5. Successful registration creates user as ADMIN (pharmacy owner)
             with patch("google.oauth2.id_token.verify_oauth2_token", return_value={
                 "email": "newgoogleuser@example.com",
-                "name": "Google Staff User",
+                "name": "Google Admin User",
                 "email_verified": True,
                 "iss": "https://accounts.google.com",
                 "aud": "expected-client-id.apps.googleusercontent.com",
@@ -271,7 +271,7 @@ class TestRBACAndTenantIsolation:
                 res_ok = client.post("/api/auth/google-auth", json={"id_token": "valid-token"})
                 assert res_ok.status_code == 200
                 user_data = res_ok.json()["data"]["user"]
-                assert user_data["role"] == "staff"
+                assert user_data["role"] == "admin"
 
         finally:
             settings.GOOGLE_CLIENT_ID = orig_client_id
