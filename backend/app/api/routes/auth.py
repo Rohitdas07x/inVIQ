@@ -353,6 +353,21 @@ def signup(
         except Exception as mail_err:
             logger.warning("Could not send welcome email on signup: %s", mail_err)
 
+        # Asynchronously index onboarding context into Vector Memory
+        if user.org_id:
+            try:
+                from app.workers.tasks import sync_onboarding_context_task
+                sync_onboarding_context_task.delay(
+                    org_id=user.org_id,
+                    user_id=user.id,
+                    full_name=user.full_name or user.username,
+                    pharmacy_name=org_name,
+                    primary_counter="Main Market Counter",
+                    plan_type="single_pharmacy",
+                    extra_settings={"primary_counter_name": "Main Market Counter"},
+                )
+            except Exception as vec_err:
+                logger.warning("Could not queue vector memory sync on signup: %s", vec_err)
 
     # Audit log
     audit = AuditService(db.db)
@@ -1621,6 +1636,22 @@ def google_auth(
         )
     except Exception as mail_err:
         logger.warning("Could not dispatch welcome email on Google signup: %s", mail_err)
+
+    # Asynchronously index onboarding context into Vector Memory
+    if user.org_id:
+        try:
+            from app.workers.tasks import sync_onboarding_context_task
+            sync_onboarding_context_task.delay(
+                org_id=user.org_id,
+                user_id=user.id,
+                full_name=user.full_name or user.username,
+                pharmacy_name=org_name,
+                primary_counter="Main Market Counter",
+                plan_type="single_pharmacy",
+                extra_settings={"primary_counter_name": "Main Market Counter"},
+            )
+        except Exception as vec_err:
+            logger.warning("Could not queue vector memory sync on Google signup: %s", vec_err)
 
     json_resp = JSONResponse(
         content={
