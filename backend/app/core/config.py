@@ -90,7 +90,7 @@ class Settings(BaseSettings):
 
     # ── AI / LLM ───────────────────────────────────────────────────────
     GROQ_API_KEY: Optional[str] = None
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MODEL: str = "openai/gpt-oss-120b"
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 1024
 

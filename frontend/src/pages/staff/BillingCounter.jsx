@@ -11,6 +11,8 @@ import {
     Loader2,
     RotateCcw,
     MapPin,
+    Building2,
+    Plus,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -79,7 +81,7 @@ export default function BillingCounter() {
                 setStatus('open');
                 setTimeout(() => barcodeRef.current?.focus(), 100);
             } else {
-                setError(json.detail || json.message || 'Failed to open session');
+                setError(json.detail || json.message || 'Failed to open billing session');
             }
         } catch (e) {
             setError(e.message);
@@ -99,48 +101,64 @@ export default function BillingCounter() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({
-                    barcode: barcode.trim(),
-                    quantity: qty,
-                    location_id: parseInt(locationId),
-                    unit: scanUnit.trim() || undefined,
-                }),
+                body: JSON.stringify({ barcode: barcode.trim(), qty: parseInt(qty) || 1 }),
             });
             const json = await res.json();
             if (res.ok && json.success) {
-                setItems(json.data.items || []);
-                setBillingPreview(json.data.billing_preview);
+                setItems(json.data.items);
+                setBillingPreview(json.data);
                 setBarcode('');
                 setQty(1);
-                setScanUnit('');
-                if (barcodeRef.current) barcodeRef.current.focus();
+                setSuccess(`Scanned: ${json.data.scanned_item?.item_name || barcode}`);
+                setTimeout(() => setSuccess(null), 2500);
             } else {
-                setError(json.detail || json.message || 'Scan failed');
+                setError(json.detail || json.message || 'Item scan failed');
             }
         } catch (e) {
             setError(e.message);
         } finally {
             setScanning(false);
+            barcodeRef.current?.focus();
         }
     };
 
-    // ── Checkout ─────────────────────────────────────────────────────────────
-    const handleCheckout = async () => {
-        if (!items.length) { setError('No items in cart. Scan at least one medicine.'); return; }
+    // ── Remove Item ──────────────────────────────────────────────────────────
+    const handleRemove = async (itemId) => {
+        clearMessages();
+        try {
+            const res = await fetch(`/api/billing/sessions/${sessionId}/items/${itemId}`, {
+                method: 'DELETE',
+                credentials: 'include',
+            });
+            const json = await res.json();
+            if (res.ok && json.success) {
+                setItems(json.data.items);
+                setBillingPreview(json.data);
+            } else {
+                setError(json.detail || 'Failed to remove item');
+            }
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
+    // ── Close / Complete ─────────────────────────────────────────────────────
+    const handleClose = async () => {
+        if (!window.confirm('Confirm payment and close this bill?')) return;
         clearMessages();
         setLoading(true);
         try {
-            const res = await fetch(`/api/billing/sessions/${sessionId}/checkout`, {
+            const res = await fetch(`/api/billing/sessions/${sessionId}/close`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
             });
             const json = await res.json();
             if (res.ok && json.success) {
                 setClosedSession(json.data);
                 setStatus('closed');
+                setSuccess(`Bill #${sessionId} closed. Total: ₹${json.data.net_total?.toFixed(2)}`);
             } else {
-                setError(json.detail || json.message || 'Checkout failed');
+                setError(json.detail || 'Failed to close billing session');
             }
         } catch (e) {
             setError(e.message);
@@ -149,23 +167,25 @@ export default function BillingCounter() {
         }
     };
 
-    // ── Cancel ────────────────────────────────────────────────────────────────
+    // ── Cancel ───────────────────────────────────────────────────────────────
     const handleCancel = async () => {
-        if (!window.confirm('Cancel this bill? All scanned stock will be restored.')) return;
+        if (!window.confirm('Cancel this billing session? Scanned stock reservations will be restored.')) return;
         clearMessages();
         setLoading(true);
         try {
-            const res = await fetch(`/api/billing/sessions/${sessionId}`, {
-                method: 'DELETE',
+            const res = await fetch(`/api/billing/sessions/${sessionId}/cancel`, {
+                method: 'POST',
                 credentials: 'include',
             });
             const json = await res.json();
             if (res.ok && json.success) {
-                setStatus('cancelled');
-                setError(null);
-                setSuccess('Bill cancelled. Stock has been restored.');
+                setStatus('idle');
+                setSessionId(null);
+                setItems([]);
+                setBillingPreview(null);
+                setSuccess('Billing session cancelled.');
             } else {
-                setError(json.detail || json.message || 'Cancel failed');
+                setError(json.detail || 'Failed to cancel session');
             }
         } catch (e) {
             setError(e.message);
@@ -174,7 +194,6 @@ export default function BillingCounter() {
         }
     };
 
-    // ── New Bill ──────────────────────────────────────────────────────────────
     const handleNewBill = () => {
         setSessionId(null);
         setStatus('idle');
@@ -184,287 +203,309 @@ export default function BillingCounter() {
         clearMessages();
     };
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     const fmtCur = (n) => `₹${parseFloat(n || 0).toFixed(2)}`;
 
     return (
-        <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
-            {/* Header */}
-            <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-violet-100 rounded-xl">
-                    <ScanBarcode size={22} className="text-violet-700" />
+        <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 font-sans">
+            
+            {/* Header (Sharp Zoho Theme) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-300 p-5 rounded-none shadow-xs">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-900 text-white flex items-center justify-center rounded-none font-bold">
+                        <ScanBarcode size={20} />
+                    </div>
+                    <div>
+                        <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
+                            Retail POS &amp; Billing Counter
+                        </h1>
+                        <p className="text-xs text-slate-500">
+                            Scan medicine barcodes, apply batch discounts, and print bills in real time
+                        </p>
+                    </div>
                 </div>
-                <div>
-                    <h1 className="text-xl font-extrabold text-slate-900">Billing Counter</h1>
-                    <p className="text-xs text-slate-500">Scan medicines, auto-apply discount, generate bill</p>
-                </div>
+
                 {sessionId && (
-                    <span className="ml-auto px-3 py-1 rounded-full text-xs font-bold bg-violet-100 text-violet-700 border border-violet-200">
-                        Bill #{sessionId}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span className="px-3 py-1.5 rounded-none text-xs font-mono font-bold bg-slate-100 text-slate-900 border border-slate-300">
+                            SESSION BILL #{sessionId}
+                        </span>
+                        {status === 'open' && (
+                            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-none">
+                                ACTIVE
+                            </span>
+                        )}
+                    </div>
                 )}
             </div>
 
-            {/* Toast messages */}
+            {/* Toast Alerts */}
             {error && (
-                <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs animate-in fade-in">
-                    <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-300 text-rose-800 text-xs rounded-none">
+                    <AlertCircle size={14} className="shrink-0 text-rose-600" />
                     <span>{error}</span>
-                    <button onClick={clearMessages} className="ml-auto font-semibold">✕</button>
+                    <button onClick={clearMessages} className="ml-auto font-bold text-rose-600">✕</button>
                 </div>
             )}
             {success && (
-                <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs animate-in fade-in">
-                    <CheckCircle2 size={13} className="shrink-0 text-emerald-500" />
+                <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-none">
+                    <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
                     <span>{success}</span>
-                    <button onClick={clearMessages} className="ml-auto font-semibold">✕</button>
+                    <button onClick={clearMessages} className="ml-auto font-bold text-emerald-700">✕</button>
                 </div>
             )}
 
-            {/* ── IDLE: Setup ─────────────────────────────────────────────── */}
+            {/* ── IDLE STATE: Setup & Open Bill ─────────────────────────────── */}
             {status === 'idle' && (
-                <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-8 space-y-6">
-                    <div className="text-center space-y-2">
-                        <div className="mx-auto w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center">
-                            <ShoppingCart size={30} className="text-violet-500" />
+                <div className="bg-white border border-slate-300 rounded-none shadow-xs p-8 text-center space-y-6">
+                    <div className="max-w-md mx-auto space-y-2">
+                        <div className="w-12 h-12 bg-slate-100 border border-slate-200 text-slate-800 flex items-center justify-center mx-auto rounded-none">
+                            <ShoppingCart size={24} />
                         </div>
-                        <h2 className="text-lg font-bold text-slate-900">Start a New Bill</h2>
-                        <p className="text-xs text-slate-500">Select a counter, then open the bill to start scanning medicines.</p>
+                        <h2 className="text-base font-bold text-slate-900">Initiate New Customer Bill</h2>
+                        <p className="text-xs text-slate-500">
+                            Select your retail shop counter to initialize the real-time stock allocation session.
+                        </p>
                     </div>
 
-                    <div className="max-w-sm mx-auto space-y-4">
+                    <div className="max-w-sm mx-auto space-y-4 text-left">
                         <div>
-                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                                <MapPin size={12} className="inline mr-1 text-violet-500" />
-                                Counter / Location
+                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                                Select Shop Counter / Location <span className="text-red-500">*</span>
                             </label>
-                            <select
-                                value={locationId}
-                                onChange={e => setLocationId(e.target.value)}
-                                className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900"
-                            >
-                                <option value="">— Select location —</option>
-                                {locations.map(loc => (
-                                    <option key={loc.id} value={loc.id}>{loc.name} ({loc.type})</option>
-                                ))}
-                            </select>
+                            <div className="relative">
+                                <MapPin className="absolute left-3 top-2.5 text-slate-400" size={15} />
+                                <select
+                                    value={locationId}
+                                    onChange={e => setLocationId(e.target.value)}
+                                    className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 font-medium"
+                                >
+                                    <option value="">— Select Location Counter —</option>
+                                    {locations.map(loc => (
+                                        <option key={loc.id} value={loc.id}>
+                                            {loc.name} ({loc.type || 'Retail Counter'})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
+
                         <button
                             onClick={handleOpen}
                             disabled={loading || !locationId}
-                            className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white font-bold text-sm rounded-xl transition-all shadow-md shadow-violet-500/20 flex items-center justify-center gap-2"
+                            className="w-full py-2.5 bg-slate-900 hover:bg-black disabled:bg-slate-300 text-white font-bold text-xs uppercase tracking-wider rounded-none transition flex items-center justify-center gap-2"
                         >
-                            {loading ? <Loader2 size={16} className="animate-spin" /> : <ScanBarcode size={16} />}
-                            Open Bill
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <ScanBarcode size={14} />}
+                            <span>Open Billing Session</span>
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* ── OPEN: Scan + Cart ────────────────────────────────────────── */}
+            {/* ── OPEN STATE: Barcode Scanner & Real-Time Cart ──────────────── */}
             {status === 'open' && (
-                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                    {/* Scan panel */}
-                    <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-5">
-                        <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <ScanBarcode size={16} className="text-violet-600" /> Scan Medicine
-                        </h2>
-                        <form onSubmit={handleScan} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">Barcode / Item ID</label>
-                                <input
-                                    ref={barcodeRef}
-                                    type="text"
-                                    value={barcode}
-                                    onChange={e => setBarcode(e.target.value)}
-                                    placeholder="Scan strip, box, or item barcode..."
-                                    className="w-full px-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900 font-mono"
-                                    autoComplete="off"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-600 mb-1">Quantity</label>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    {/* Left 2 Cols: Scanner + Scanned Items List */}
+                    <div className="lg:col-span-2 space-y-4">
+                        
+                        {/* Barcode Input Bar */}
+                        <form onSubmit={handleScan} className="bg-white border border-slate-300 p-4 rounded-none shadow-xs space-y-3">
+                            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                Barcode Scanner &amp; SKU Lookup
+                            </h3>
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <ScanBarcode className="absolute left-3 top-2.5 text-slate-400" size={16} />
                                     <input
-                                        type="number" min="1" max="9999"
-                                        value={qty}
-                                        onChange={e => setQty(parseInt(e.target.value) || 1)}
-                                        className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-600 mb-1">Unit (Optional)</label>
-                                    <input
+                                        ref={barcodeRef}
                                         type="text"
-                                        value={scanUnit}
-                                        onChange={e => setScanUnit(e.target.value)}
-                                        placeholder="strip, box..."
-                                        className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900"
+                                        placeholder="Scan barcode or type SKU (e.g. 890108600112)..."
+                                        value={barcode}
+                                        onChange={e => setBarcode(e.target.value)}
+                                        className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-none bg-white text-slate-900 font-mono focus:outline-none focus:border-slate-900"
                                     />
                                 </div>
+                                <div className="w-24">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        placeholder="Qty"
+                                        value={qty}
+                                        onChange={e => setQty(e.target.value)}
+                                        className="w-full px-2 py-2 text-xs border border-slate-300 rounded-none text-center font-bold bg-white text-slate-900 focus:outline-none focus:border-slate-900"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={scanning || !barcode.trim()}
+                                    className="px-4 py-2 bg-slate-900 hover:bg-black disabled:bg-slate-300 text-white text-xs font-bold uppercase rounded-none transition flex items-center gap-1.5"
+                                >
+                                    {scanning ? <Loader2 size={13} className="animate-spin" /> : <Plus size={14} />}
+                                    <span>Add Item</span>
+                                </button>
                             </div>
-                            <button
-                                type="submit"
-                                disabled={scanning || !barcode.trim()}
-                                className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
-                            >
-                                {scanning
-                                    ? <Loader2 size={14} className="animate-spin" />
-                                    : <ScanBarcode size={14} />
-                                }
-                                {scanning ? 'Adding...' : 'Add to Bill'}
-                            </button>
                         </form>
 
-                        {/* Cancel bill */}
-                        <button
-                            onClick={handleCancel}
-                            disabled={loading}
-                            className="w-full py-2 border border-rose-200 text-rose-500 hover:bg-rose-50 font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
-                        >
-                            <XCircle size={13} /> Cancel Bill
-                        </button>
-                    </div>
+                        {/* Items Table */}
+                        <div className="bg-white border border-slate-300 rounded-none shadow-xs overflow-hidden">
+                            <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                    Scanned Cart Items ({items.length})
+                                </h3>
+                                <button
+                                    onClick={handleCancel}
+                                    className="text-xs text-rose-600 hover:text-rose-800 font-semibold"
+                                >
+                                    Cancel Bill
+                                </button>
+                            </div>
 
-                    {/* Cart panel */}
-                    <div className="lg:col-span-3 bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-4">
-                        <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <ShoppingCart size={16} className="text-violet-600" />
-                            Cart
-                            {items.length > 0 && (
-                                <span className="ml-auto text-xs text-slate-500">{items.length} item{items.length > 1 ? 's' : ''}</span>
+                            {items.length === 0 ? (
+                                <div className="p-12 text-center text-slate-400">
+                                    <ScanBarcode size={32} className="mx-auto mb-2 text-slate-300" />
+                                    <p className="text-xs font-semibold text-slate-700">No items scanned yet</p>
+                                    <p className="text-[11px] text-slate-400">Scan any medicine packaging barcode or SKU to add to cart.</p>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-xs border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
+                                                <th className="py-2.5 px-3">Medicine</th>
+                                                <th className="py-2.5 px-3">Batch &amp; Expiry</th>
+                                                <th className="py-2.5 px-3 text-right">MRP</th>
+                                                <th className="py-2.5 px-3 text-center">Qty</th>
+                                                <th className="py-2.5 px-3 text-right">Disc</th>
+                                                <th className="py-2.5 px-3 text-right">Total</th>
+                                                <th className="py-2.5 px-2 text-center">Del</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 font-medium">
+                                            {items.map(item => (
+                                                <tr key={item.id} className="hover:bg-slate-50">
+                                                    <td className="p-3">
+                                                        <p className="font-bold text-slate-900">{item.item_name}</p>
+                                                        <span className="text-[10px] text-slate-400 font-mono">{item.barcode || item.sku}</span>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <span className="font-mono text-xs font-semibold text-slate-800">{item.batch_number || 'BATCH-AUTO'}</span>
+                                                        <p className="text-[10px] text-slate-400">{item.expiry_date || 'Standard'}</p>
+                                                    </td>
+                                                    <td className="p-3 text-right font-mono">{fmtCur(item.mrp || item.unit_price)}</td>
+                                                    <td className="p-3 text-center font-bold">{item.quantity}</td>
+                                                    <td className="p-3 text-right text-emerald-700 font-mono">
+                                                        {item.discount_percent ? `${item.discount_percent}%` : '—'}
+                                                    </td>
+                                                    <td className="p-3 text-right font-mono font-bold text-slate-900">
+                                                        {fmtCur(item.line_total || (item.quantity * item.unit_price))}
+                                                    </td>
+                                                    <td className="p-3 text-center">
+                                                        <button
+                                                            onClick={() => handleRemove(item.id)}
+                                                            className="text-slate-400 hover:text-rose-600 transition"
+                                                            title="Remove line"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             )}
-                        </h2>
-
-                        {items.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-2">
-                                <ShoppingCart size={36} className="opacity-30" />
-                                <p className="text-xs">No items yet — scan a medicine</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                                {items.map((item, idx) => (
-                                    <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-semibold text-slate-900 truncate">{item.item_name}</p>
-                                            <p className="text-[11px] text-slate-500">
-                                                {item.qty} {item.packaging_unit || 'unit'}{item.qty > 1 && !item.packaging_unit?.endsWith('s') ? 's' : ''} × {fmtCur(item.mrp)} = <span className="font-bold text-slate-800">{fmtCur(item.line_total)}</span>
-                                                {item.multiplier > 1 && (
-                                                    <span className="text-[10px] text-slate-400 ml-1.5 font-normal">
-                                                        ({item.base_qty_deducted} {item.base_unit || 'tabs'})
-                                                    </span>
-                                                )}
-                                            </p>
-                                            {item.batch_number && (
-                                                <p className="text-[10px] text-slate-400 font-mono">Batch: {item.batch_number}</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Billing preview */}
-                        {billingPreview && (
-                            <div className="border-t border-slate-100 pt-4 space-y-2">
-                                <div className="flex justify-between text-xs text-slate-600">
-                                    <span>Gross Total</span>
-                                    <span className="font-semibold">{fmtCur(billingPreview.gross_total)}</span>
-                                </div>
-                                {billingPreview.discount_amount > 0 && (
-                                    <div className="flex justify-between text-xs text-emerald-700">
-                                        <span className="flex items-center gap-1">
-                                            <Tag size={10} /> Discount ({billingPreview.discount_model}, {billingPreview.discount_pct}%)
-                                        </span>
-                                        <span className="font-semibold">−{fmtCur(billingPreview.discount_amount)}</span>
-                                    </div>
-                                )}
-                                <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-100">
-                                    <span>Net Payable</span>
-                                    <span className="text-violet-700">{fmtCur(billingPreview.net_total)}</span>
-                                </div>
-                            </div>
-                        )}
-
-                        {items.length > 0 && (
-                            <button
-                                onClick={handleCheckout}
-                                disabled={loading}
-                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white font-bold text-sm rounded-xl transition-all shadow-md shadow-emerald-500/20 flex items-center justify-center gap-2"
-                            >
-                                {loading ? <Loader2 size={16} className="animate-spin" /> : <Receipt size={16} />}
-                                Checkout & Print Bill
-                            </button>
-                        )}
+                        </div>
                     </div>
+
+                    {/* Right 1 Col: Bill Summary Card */}
+                    <div className="space-y-4">
+                        <div className="bg-white border border-slate-300 rounded-none shadow-xs p-5 space-y-4">
+                            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider pb-2 border-b border-slate-200">
+                                Bill Computation Summary
+                            </h3>
+
+                            <div className="space-y-2 text-xs">
+                                <div className="flex justify-between text-slate-600">
+                                    <span>Total Items:</span>
+                                    <span className="font-bold text-slate-900">{items.reduce((acc, i) => acc + (i.quantity || 1), 0)} Units</span>
+                                </div>
+                                <div className="flex justify-between text-slate-600">
+                                    <span>Gross Total:</span>
+                                    <span className="font-mono">{fmtCur(billingPreview?.gross_total || 0)}</span>
+                                </div>
+                                <div className="flex justify-between text-emerald-700">
+                                    <span>Total Discount:</span>
+                                    <span className="font-mono font-bold">- {fmtCur(billingPreview?.discount_amount || 0)}</span>
+                                </div>
+                                <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
+                                    <span className="text-sm font-extrabold text-slate-900">Net Payable:</span>
+                                    <span className="text-xl font-extrabold font-mono text-slate-900">
+                                        {fmtCur(billingPreview?.net_total || 0)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={handleClose}
+                                disabled={loading || items.length === 0}
+                                className="w-full py-3 bg-slate-900 hover:bg-black disabled:bg-slate-300 text-white font-bold text-xs uppercase tracking-wider rounded-none transition flex items-center justify-center gap-2"
+                            >
+                                {loading ? <Loader2 size={14} className="animate-spin" /> : <Receipt size={15} />}
+                                <span>Complete Bill &amp; Print</span>
+                            </button>
+                        </div>
+                    </div>
+
                 </div>
             )}
 
-            {/* ── CLOSED: Receipt ──────────────────────────────────────────── */}
+            {/* ── CLOSED STATE: Receipt & Bill Summary ──────────────────────── */}
             {status === 'closed' && closedSession && (
-                <div className="bg-white border border-emerald-200 rounded-2xl shadow-xs p-8 space-y-6 animate-in fade-in">
-                    <div className="text-center space-y-2">
-                        <div className="mx-auto w-14 h-14 bg-emerald-50 rounded-2xl flex items-center justify-center">
-                            <CheckCircle2 size={28} className="text-emerald-600" />
-                        </div>
-                        <h2 className="text-lg font-extrabold text-slate-900">Bill Closed Successfully</h2>
-                        <p className="text-xs text-slate-500">Bill #{closedSession.session_id} • {closedSession.closed_at?.split('T')[0]}</p>
+                <div className="bg-white border border-slate-300 rounded-none p-8 max-w-lg mx-auto shadow-xs text-center space-y-5">
+                    <div className="w-12 h-12 bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto rounded-none">
+                        <CheckCircle2 size={24} />
                     </div>
 
-                    {/* Receipt summary */}
-                    <div className="max-w-sm mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3 font-mono text-xs">
-                        <p className="text-center font-bold text-slate-800 text-sm">RECEIPT</p>
-                        <hr className="border-slate-200 border-dashed" />
-                        {(closedSession.items || []).map((item, idx) => (
-                            <div key={idx} className="flex justify-between text-slate-700">
-                                <span className="truncate max-w-[65%]">
-                                    {item.item_name} ({item.qty} {item.packaging_unit || 'unit'})
-                                </span>
-                                <span>{fmtCur(item.line_total)}</span>
-                            </div>
-                        ))}
-                        <hr className="border-slate-200 border-dashed" />
-                        <div className="flex justify-between text-slate-600">
-                            <span>Gross</span>
-                            <span>{fmtCur(closedSession.billing?.gross_total)}</span>
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-900">Transaction Completed</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Bill #{closedSession.session_id || sessionId} recorded and ledger updated.
+                        </p>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 p-4 text-xs space-y-2 text-left font-mono">
+                        <div className="flex justify-between">
+                            <span className="text-slate-500">Gross Amount:</span>
+                            <span className="font-bold text-slate-800">{fmtCur(closedSession.gross_total)}</span>
                         </div>
-                        {closedSession.billing?.discount_amount > 0 && (
-                            <div className="flex justify-between text-emerald-700">
-                                <span>Discount ({closedSession.billing?.discount_pct}%)</span>
-                                <span>−{fmtCur(closedSession.billing?.discount_amount)}</span>
-                            </div>
-                        )}
-                        <div className="flex justify-between font-extrabold text-slate-900 text-sm pt-1 border-t border-slate-200 border-dashed">
-                            <span>NET PAYABLE</span>
-                            <span className="text-violet-700">{fmtCur(closedSession.billing?.net_total)}</span>
+                        <div className="flex justify-between text-emerald-700">
+                            <span>Discount:</span>
+                            <span className="font-bold">- {fmtCur(closedSession.discount_amount)}</span>
+                        </div>
+                        <div className="pt-2 border-t border-slate-300 flex justify-between text-sm font-bold text-slate-900">
+                            <span>Total Paid:</span>
+                            <span>{fmtCur(closedSession.net_total)}</span>
                         </div>
                     </div>
 
-                    <div className="flex justify-center">
+                    <div className="flex gap-3 pt-2">
+                        <button
+                            onClick={() => window.print()}
+                            className="flex-1 py-2.5 bg-white border border-slate-300 text-slate-800 hover:bg-slate-100 text-xs font-bold uppercase rounded-none transition"
+                        >
+                            Print Thermal Slip
+                        </button>
                         <button
                             onClick={handleNewBill}
-                            className="py-2.5 px-8 bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm rounded-xl transition-all shadow-md shadow-violet-500/20 flex items-center gap-2"
+                            className="flex-1 py-2.5 bg-slate-900 hover:bg-black text-white text-xs font-bold uppercase rounded-none transition flex items-center justify-center gap-1.5"
                         >
-                            <RotateCcw size={15} /> New Bill
+                            <RotateCcw size={13} />
+                            <span>Start Next Bill</span>
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* ── CANCELLED ────────────────────────────────────────────────── */}
-            {status === 'cancelled' && (
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-10 text-center space-y-4">
-                    <XCircle size={40} className="mx-auto text-rose-400" />
-                    <p className="text-sm font-bold text-slate-700">Bill #{sessionId} Cancelled</p>
-                    <p className="text-xs text-slate-400">All stock has been restored to inventory.</p>
-                    <button
-                        onClick={handleNewBill}
-                        className="py-2.5 px-8 bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm rounded-xl transition-all flex items-center gap-2 mx-auto"
-                    >
-                        <RotateCcw size={15} /> Start New Bill
-                    </button>
-                </div>
-            )}
         </div>
     );
 }

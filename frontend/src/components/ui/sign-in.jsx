@@ -79,7 +79,7 @@ export const LightSignIn = () => {
   const handleGoogleLogin = () => {
     const clientId = "232640553692-bk12l0dqojirdv31gsr8geag0aju75jf.apps.googleusercontent.com";
     const redirectUri = window.location.origin + window.location.pathname;
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=openid%20email%20profile`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=openid%20email%20profile&prompt=select_account`;
     window.location.href = authUrl;
   };
 

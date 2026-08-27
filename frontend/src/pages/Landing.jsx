@@ -201,17 +201,20 @@ export default function Landing() {
 
           <h1 className="text-3xl sm:text-5xl md:text-7xl font-bold tracking-tight text-slate-900 mb-5 md:mb-7 leading-[1.15] cursor-default">
             Never Lose Money on<br />
-            <Typewriter
-              words={[
-                "Expired Medicines",
-                "Missed Reorders",
-                "Low-Stock Surprises",
-              ]}
-              speed={72}
-              delayBetweenWords={2400}
-              cursor={true}
-              cursorChar="|"
-            />
+            <span className="text-blue-600 inline-block min-h-[1.2em]">
+              <Typewriter
+                words={[
+                  "Expired Medicines",
+                  "Missed Reorders",
+                  "Low-Stock Surprises",
+                ]}
+                speed={75}
+                deleteSpeed={40}
+                delayBetweenWords={2200}
+                cursor={true}
+                cursorChar="|"
+              />
+            </span>
           </h1>
 
           <p className="text-sm sm:text-base md:text-lg text-slate-500 mb-8 sm:mb-10 max-w-xl mx-auto leading-relaxed">

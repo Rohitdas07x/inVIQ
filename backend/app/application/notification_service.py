@@ -16,6 +16,9 @@ from app.infrastructure.email import smtp_client
 logger = logging.getLogger("smart_inventory.notification")
 
 
+LOGO_URL = "https://raw.githubusercontent.com/Sayandip05/InvIQ/main/frontend/public/logo.png"
+
+
 class NotificationService:
     """Service for orchestrating notifications to users and administrators."""
 
@@ -79,6 +82,7 @@ class NotificationService:
         <body>
             <div class="container">
                 <div class="header">
+                    <img src="{LOGO_URL}" alt="InvIQ Logo" width="44" height="44" style="width: 44px; height: 44px; object-fit: contain; display: block; margin: 0 auto 10px;" />
                     <h1>InvIQ</h1>
                     <p>Smart Inventory & Warehouse Management</p>
                 </div>
@@ -193,6 +197,7 @@ class NotificationService:
         <body>
             <div class="container">
                 <div class="header">
+                    <img src="{LOGO_URL}" alt="InvIQ Logo" width="44" height="44" style="width: 44px; height: 44px; object-fit: contain; display: block; margin: 0 auto 10px;" />
                     <h1>InvIQ — Stock Alert</h1>
                     <p>Automated Inventory Alert</p>
                 </div>
@@ -286,7 +291,9 @@ class NotificationService:
         <body>
             <div class="card">
                 <div class="header">
+                    <img src="{LOGO_URL}" alt="InvIQ Logo" width="48" height="48" style="width: 48px; height: 48px; object-fit: contain; display: block; margin: 0 auto 10px;" />
                     <h1 class="logo-text">InvIQ</h1>
+                    <p style="margin: 2px 0 0; color: #64748b; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Smart Inventory Platform</p>
                 </div>
                 <div class="greeting">Hi {display_name},</div>
                 <p class="text">

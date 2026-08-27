@@ -1,63 +1,97 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
+/**
+ * High-performance, glitch-free Typewriter effect.
+ * Uses a single deterministic state machine without nested timeouts or re-render collisions.
+ */
 export function Typewriter({
-  words,
-  speed = 100,
-  delayBetweenWords = 2000,
+  words = [
+    "Expired Medicines",
+    "Missed Reorders",
+    "Low-Stock Surprises",
+  ],
+  speed = 80,
+  deleteSpeed = 45,
+  delayBetweenWords = 2200,
   cursor = true,
   cursorChar = "|",
+  className = "",
 }) {
   const [displayText, setDisplayText] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [wordIndex, setWordIndex] = useState(0);
-  const [charIndex, setCharIndex] = useState(0);
   const [showCursor, setShowCursor] = useState(true);
 
-  const currentWord = words[wordIndex];
+  // Keep state in refs so timers always read the latest tick without triggering stale closures
+  const stateRef = useRef({
+    wordIndex: 0,
+    isDeleting: false,
+    text: "",
+  });
 
   useEffect(() => {
-    const timeout = setTimeout(
-      () => {
-        if (!isDeleting) {
-          if (charIndex < currentWord.length) {
-            setDisplayText(currentWord.substring(0, charIndex + 1));
-            setCharIndex(charIndex + 1);
-          } else {
-            setTimeout(() => {
-              setIsDeleting(true);
-            }, delayBetweenWords);
-          }
+    if (!words || words.length === 0) return;
+
+    let timer = null;
+
+    const tick = () => {
+      const { wordIndex, isDeleting, text } = stateRef.current;
+      const targetWord = words[wordIndex % words.length] || "";
+
+      if (!isDeleting) {
+        // Typing characters forward
+        if (text.length < targetWord.length) {
+          const nextText = targetWord.slice(0, text.length + 1);
+          stateRef.current.text = nextText;
+          setDisplayText(nextText);
+          timer = setTimeout(tick, speed);
         } else {
-          if (charIndex > 0) {
-            setDisplayText(currentWord.substring(0, charIndex - 1));
-            setCharIndex(charIndex - 1);
-          } else {
-            setIsDeleting(false);
-            setWordIndex((prev) => (prev + 1) % words.length);
-          }
+          // Word is completely typed — pause before deleting
+          stateRef.current.isDeleting = true;
+          timer = setTimeout(tick, delayBetweenWords);
         }
-      },
-      isDeleting ? speed / 2 : speed,
-    );
+      } else {
+        // Deleting characters backward
+        if (text.length > 0) {
+          const nextText = targetWord.slice(0, text.length - 1);
+          stateRef.current.text = nextText;
+          setDisplayText(nextText);
+          timer = setTimeout(tick, deleteSpeed);
+        } else {
+          // Word is completely deleted — move to next word and start typing
+          stateRef.current.isDeleting = false;
+          stateRef.current.wordIndex = (wordIndex + 1) % words.length;
+          timer = setTimeout(tick, speed);
+        }
+      }
+    };
 
-    return () => clearTimeout(timeout);
-  }, [charIndex, currentWord, isDeleting, speed, delayBetweenWords, wordIndex, words]);
+    // Kick off typing initial word
+    timer = setTimeout(tick, speed);
 
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [words, speed, deleteSpeed, delayBetweenWords]);
+
+  // Smooth cursor blinking
   useEffect(() => {
     if (!cursor) return;
-    const cursorInterval = setInterval(() => {
+    const cursorTimer = setInterval(() => {
       setShowCursor((prev) => !prev);
     }, 530);
-    return () => clearInterval(cursorInterval);
+    return () => clearInterval(cursorTimer);
   }, [cursor]);
 
   return (
-    <span className="inline-block">
-      {displayText}
+    <span className={`inline-block ${className}`}>
+      <span>{displayText}</span>
       {cursor && (
         <span
-          className="ml-0.5 font-light"
-          style={{ opacity: showCursor ? 1 : 0, transition: "opacity 0.07s" }}
+          className="ml-0.5 font-light text-blue-600 select-none inline-block align-baseline"
+          style={{
+            opacity: showCursor ? 1 : 0,
+            transition: "opacity 0.08s ease-in-out",
+          }}
+          aria-hidden="true"
         >
           {cursorChar}
         </span>

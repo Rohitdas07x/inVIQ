@@ -53,13 +53,14 @@ export function AuthProvider({ children }) {
                         username: payload.username,
                         role: payload.role,
                         org_id: payload.org_id,
+                        email: payload.email || '',
+                        full_name: payload.full_name || '',
+                        organization_name: payload.organization_name || '',
                     });
-                    setLoading(false);
-                    return;
                 }
             }
 
-            // Fallback: verify via HttpOnly cookie by checking /auth/me
+            // Always hydrate full fresh profile from backend /auth/me
             try {
                 const meRes = await auth.me();
                 if (meRes?.data?.data) {
@@ -69,14 +70,17 @@ export function AuthProvider({ children }) {
                         username: u.username,
                         role: u.role,
                         org_id: u.org_id,
-                        email: u.email,
-                        full_name: u.full_name,
+                        email: u.email || '',
+                        full_name: u.full_name || '',
+                        organization_name: u.organization_name || '',
                         location_ids: u.location_ids || [],
                     });
                 }
-            } catch {
-                setAuthToken(null);
-                setUser(null);
+            } catch (err) {
+                if (!token) {
+                    setAuthToken(null);
+                    setUser(null);
+                }
             } finally {
                 setLoading(false);
             }

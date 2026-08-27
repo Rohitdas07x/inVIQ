@@ -62,41 +62,50 @@ const Sidebar = () => {
             }`}
         >
             {/* ── Brand / Header ────────────────────────────────────────── */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                {!collapsed && (
-                    <div className="flex items-center space-x-2.5 min-w-0">
-                        <div className="w-8 h-8 bg-slate-900 flex items-center justify-center font-bold text-white shrink-0">
-                            IQ
+            <div className={`flex items-center pb-4 border-b border-slate-100 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+                {!collapsed ? (
+                    <>
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                            <img
+                                src="/logo.png"
+                                alt="InvIQ Logo"
+                                className="w-8 h-8 object-contain shrink-0"
+                            />
+                            <div className="min-w-0">
+                                <span className="font-black text-slate-900 tracking-tight text-base block leading-none">
+                                    InvIQ
+                                </span>
+                                <span className="text-[10px] text-slate-600 block mt-0.5 tracking-wider font-semibold">
+                                    SMART INVENTORY
+                                </span>
+                            </div>
                         </div>
-                        <div className="min-w-0">
-                            <span className="font-black text-slate-900 tracking-tight text-base block leading-none">
-                                InvIQ
-                            </span>
-                            <span className="text-[10px] text-slate-600 block mt-0.5 tracking-wider font-semibold">
-                                SMART INVENTORY
-                            </span>
-                        </div>
-                    </div>
-                )}
 
-                {collapsed && (
-                    <div className="w-8 h-8 bg-slate-900 flex items-center justify-center font-bold text-white mx-auto">
-                        IQ
-                    </div>
+                        {/* Collapse button (shown only in expanded view) */}
+                        <button
+                            onClick={() => setCollapsed(true)}
+                            className="text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1.5 transition-colors cursor-pointer rounded-none"
+                            title="Collapse sidebar"
+                            aria-label="Collapse sidebar"
+                        >
+                            <PanelLeftClose size={16} />
+                        </button>
+                    </>
+                ) : (
+                    /* Collapsed view: The logo itself acts as the toggle button */
+                    <button
+                        onClick={() => setCollapsed(false)}
+                        className="w-9 h-9 flex items-center justify-center mx-auto hover:bg-slate-100 transition-all cursor-pointer rounded-none group p-1"
+                        title="Expand sidebar"
+                        aria-label="Expand sidebar"
+                    >
+                        <img
+                            src="/logo.png"
+                            alt="InvIQ Logo"
+                            className="w-7 h-7 object-contain group-hover:scale-110 transition-transform"
+                        />
+                    </button>
                 )}
-
-                {/* Collapse button */}
-                <button
-                    onClick={() => setCollapsed(!collapsed)}
-                    className={`text-slate-400 hover:text-slate-700 hover:bg-slate-100 p-1.5 transition-colors ${collapsed ? 'mx-auto mt-2' : ''}`}
-                    title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                >
-                    <PanelLeftClose
-                        size={16}
-                        className={`transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
-                    />
-                </button>
             </div>
 
             {/* ── Navigation Items ──────────────────────────────────────── */}

@@ -3,7 +3,7 @@ import { inventory, requisition } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import {
   Plus, Trash2, Send, ClipboardList, Clock, CheckCircle2, XCircle,
-  Building2, User, LogOut, MessageSquare, AlertTriangle, ShieldCheck
+  Building2, User, LogOut, ScanBarcode, AlertTriangle, ShieldCheck
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -11,17 +11,17 @@ const URGENCY_OPTIONS = ['LOW', 'NORMAL', 'HIGH', 'EMERGENCY'];
 const DEPARTMENTS = ['Pharmacy Counter', 'Emergency', 'ICU', 'Cardiology', 'General Ward', 'OT', 'Pediatrics', 'Oncology', 'Lab'];
 
 const STATUS_STYLES = {
-    PENDING: 'bg-amber-50 text-amber-700 border border-amber-200',
-    APPROVED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-    REJECTED: 'bg-red-50 text-red-700 border border-red-200',
-    CANCELLED: 'bg-slate-50 text-slate-500 border border-slate-200',
+    PENDING: 'bg-amber-50 text-amber-800 border border-amber-300 font-semibold',
+    APPROVED: 'bg-emerald-50 text-emerald-800 border border-emerald-300 font-semibold',
+    REJECTED: 'bg-rose-50 text-rose-800 border border-rose-300 font-semibold',
+    CANCELLED: 'bg-slate-100 text-slate-600 border border-slate-300',
 };
 
 const URGENCY_STYLES = {
-    LOW: 'bg-slate-100 text-slate-600',
-    NORMAL: 'bg-blue-50 text-blue-700 border border-blue-200',
-    HIGH: 'bg-amber-50 text-amber-700 border border-amber-200',
-    EMERGENCY: 'bg-red-50 text-red-700 border border-red-200 animate-pulse font-bold',
+    LOW: 'bg-slate-100 text-slate-700 border border-slate-200',
+    NORMAL: 'bg-slate-900 text-white border border-slate-900',
+    HIGH: 'bg-amber-100 text-amber-900 border border-amber-300 font-bold',
+    EMERGENCY: 'bg-rose-600 text-white border border-rose-600 font-bold animate-pulse',
 };
 
 const StaffRequisition = () => {
@@ -41,7 +41,7 @@ const StaffRequisition = () => {
         urgency: 'NORMAL',
         requested_by: user?.full_name || user?.username || 'Staff Pharmacist',
         notes: '',
-        items: [{ item_id: '', quantity: 1, notes: '' }],
+        items: [{ item_id: '', quantity: 1, packaging_unit: '', notes: '' }],
     });
 
     useEffect(() => {
@@ -93,23 +93,22 @@ const StaffRequisition = () => {
     const addItemRow = () => {
         setForm(prev => ({
             ...prev,
-            items: [...prev.items, { item_id: '', quantity: 1, notes: '' }],
+            items: [...prev.items, { item_id: '', quantity: 1, packaging_unit: '', notes: '' }],
         }));
     };
 
     const removeItemRow = (index) => {
+        if (form.items.length === 1) return;
         setForm(prev => ({
             ...prev,
-            items: prev.items.filter((_, i) => i !== index),
+            items: prev.items.filter((_, idx) => idx !== index),
         }));
     };
 
     const updateItemRow = (index, field, value) => {
-        setForm(prev => {
-            const newItems = [...prev.items];
-            newItems[index] = { ...newItems[index], [field]: value };
-            return { ...prev, items: newItems };
-        });
+        const newItems = [...form.items];
+        newItems[index][field] = value;
+        setForm(prev => ({ ...prev, items: newItems }));
     };
 
     const handleSubmit = async (e) => {
@@ -118,90 +117,109 @@ const StaffRequisition = () => {
         setError(null);
         setSuccess(null);
 
+        // Validation
         const validItems = form.items.filter(i => i.item_id && i.quantity > 0);
         if (validItems.length === 0) {
-            setError('Please add at least one item with a valid quantity');
+            setError('Please add at least one valid item with a quantity.');
             setLoading(false);
             return;
         }
 
         try {
             const payload = {
+                ...form,
                 location_id: parseInt(form.location_id),
-                department: form.department,
-                urgency: form.urgency,
-                requested_by: form.requested_by,
-                notes: form.notes,
                 items: validItems.map(i => ({
                     item_id: parseInt(i.item_id),
-                    quantity_requested: parseInt(i.quantity),
-                    packaging_unit: i.packaging_unit || undefined,
-                    notes: i.notes || undefined,
+                    quantity: parseInt(i.quantity),
+                    packaging_unit: i.packaging_unit ? String(i.packaging_unit).trim() : null,
+                    notes: i.notes,
                 })),
             };
 
             const res = await requisition.create(payload);
             if (res.data.success) {
-                setSuccess(res.data.message || 'Requisition submitted to store administrator');
-                setForm(prev => ({
-                    ...prev,
+                setSuccess(`Requisition ${res.data.data.requisition_number} submitted successfully!`);
+                setForm({
+                    location_id: locations[0]?.id || '',
+                    department: 'Pharmacy Counter',
+                    urgency: 'NORMAL',
+                    requested_by: user?.full_name || user?.username || 'Staff Pharmacist',
                     notes: '',
                     items: [{ item_id: '', quantity: 1, packaging_unit: '', notes: '' }],
-                }));
+                });
+                setTimeout(() => setSuccess(null), 5000);
             }
         } catch (err) {
-            setError(err.response?.data?.detail || 'Submission failed');
+            setError(err.response?.data?.error?.message || err.response?.data?.detail || 'Failed to submit requisition.');
         } finally {
             setLoading(false);
         }
     };
 
     const handleCancel = async (id) => {
+        if (!window.confirm('Are you sure you want to cancel this requisition?')) return;
         try {
-            await requisition.cancel(id, { cancelled_by: form.requested_by });
-            loadHistory();
+            const res = await requisition.cancel(id);
+            if (res.data.success) {
+                loadHistory();
+            }
         } catch (err) {
-            console.error('Cancel failed', err);
+            alert(err.response?.data?.error?.message || 'Failed to cancel requisition');
         }
     };
 
-    return (
-        <div className="min-h-screen bg-[#F8FAFC] py-8 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-4xl mx-auto space-y-6">
+    const handleLogout = async () => {
+        await logout();
+        navigate('/signin');
+    };
 
-                {/* ── Top Header / User Context Bar ──────────────────────── */}
-                <div className="bg-white border border-slate-200 p-5 rounded-none shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold uppercase tracking-wider">
-                                Staff Pharmacist Portal
-                            </span>
-                            <span className="text-xs text-slate-400">·</span>
-                            <div className="flex items-center gap-1 text-xs font-semibold text-slate-700">
-                                <Building2 size={13} className="text-blue-600" />
-                                <span>{user?.organization_name || 'Assigned Pharmacy Network'}</span>
+    return (
+        <div className="min-h-screen bg-slate-100/70 text-slate-900 p-4 md:p-8 font-sans">
+            <div className="max-w-5xl mx-auto space-y-6">
+
+                {/* ── Top Header / User Context Bar (Sharp Minimal Zoho Theme) ──────────────── */}
+                <div className="bg-white border border-slate-300 p-5 rounded-none shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                        <img
+                            src="/logo.png"
+                            alt="InvIQ Logo"
+                            className="w-9 h-9 object-contain shrink-0"
+                        />
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-none">
+                                    Staff Portal
+                                </span>
+                                <span className="text-xs text-slate-300">|</span>
+                                <div className="flex items-center gap-1 text-xs font-semibold text-slate-700">
+                                    <Building2 size={13} className="text-slate-600" />
+                                    <span>{user?.organization_name || 'Assigned Pharmacy Network'}</span>
+                                </div>
                             </div>
+                            <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight mt-0.5">
+                                Medicine Requisition &amp; Stock Intake
+                            </h1>
+                            <p className="text-xs text-slate-500">
+                                Operator: <strong className="text-slate-900">{user?.full_name || user?.username}</strong>
+                            </p>
                         </div>
-                        <h1 className="text-xl font-bold text-slate-900 mt-1">Medicine Requisition &amp; Stock Intake</h1>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                            Logged in as <strong className="text-slate-800">{user?.full_name || user?.username}</strong>
-                        </p>
                     </div>
 
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                         <Link
-                            to="/staff/chat"
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-300 rounded-none transition cursor-pointer"
+                            to="/staff/billing"
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold border border-slate-300 rounded-none transition"
                         >
-                            <MessageSquare size={13} className="text-blue-600" />
-                            <span>AI Assistant</span>
+                            <ScanBarcode size={14} className="text-slate-700" />
+                            <span>Billing Counter</span>
                         </Link>
 
                         <button
-                            onClick={logout}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-600 text-xs font-semibold border border-slate-300 rounded-none transition cursor-pointer"
+                            onClick={handleLogout}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-xs font-semibold border border-slate-300 rounded-none transition"
                         >
-                            <LogOut size={13} />
+                            <LogOut size={14} />
                             <span>Sign Out</span>
                         </button>
                     </div>
@@ -209,62 +227,67 @@ const StaffRequisition = () => {
 
                 {/* ── Unassigned Warning (If no org) ────────────────────── */}
                 {!user?.org_id && (
-                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-none flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="p-4 bg-amber-50 border border-amber-300 rounded-none flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                         <div>
                             <h4 className="text-xs font-bold text-amber-900">Unallocated Staff Account</h4>
-                            <p className="text-[11px] text-amber-700 mt-0.5">
+                            <p className="text-xs text-amber-800 mt-0.5">
                                 Your account is not yet allocated to an active Chemist Store Admin. Please ask your Pharmacy Store Owner / Admin to allocate your username (<strong>{user?.username}</strong>) in their User Management panel.
                             </p>
                         </div>
                     </div>
                 )}
 
-                {/* Tabs */}
-                <div className="flex bg-white border border-slate-200 rounded-none p-1 shadow-2xs">
+                {/* Navigation Tabs */}
+                <div className="flex bg-white border border-slate-300 rounded-none p-1 shadow-2xs">
                     <button
                         onClick={() => setActiveTab('form')}
-                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition rounded-none ${
                             activeTab === 'form'
-                                ? 'bg-blue-600 text-white shadow-2xs'
-                                : 'text-slate-600 hover:bg-slate-50'
+                                ? 'bg-slate-900 text-white'
+                                : 'text-slate-600 hover:bg-slate-100'
                         }`}
                     >
                         <Send size={13} className="inline mr-1.5" /> New Requisition
                     </button>
                     <button
                         onClick={() => setActiveTab('history')}
-                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                        className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition rounded-none ${
                             activeTab === 'history'
-                                ? 'bg-blue-600 text-white shadow-2xs'
-                                : 'text-slate-600 hover:bg-slate-50'
+                                ? 'bg-slate-900 text-white'
+                                : 'text-slate-600 hover:bg-slate-100'
                         }`}
                     >
                         <Clock size={13} className="inline mr-1.5" /> My Request History
                     </button>
                 </div>
 
-                {/* ─── NEW REQUEST FORM ─── */}
+                {/* ─── NEW REQUEST FORM (Sharp Zoho Theme) ─── */}
                 {activeTab === 'form' && (
-                    <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden">
-                        <div className="p-6 border-b border-slate-100 bg-slate-50/50 space-y-5">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <form onSubmit={handleSubmit} className="bg-white rounded-none border border-slate-300 shadow-xs overflow-hidden">
+                        <div className="p-6 border-b border-slate-200 bg-slate-50 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Your Name</label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                        Requester Name <span className="text-red-500">*</span>
+                                    </label>
                                     <input
                                         required
                                         type="text"
-                                        placeholder="e.g. Dr. Sharma"
-                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="e.g. Pharmacist Rahul"
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-900"
                                         value={form.requested_by}
                                         onChange={(e) => setForm({ ...form, requested_by: e.target.value })}
                                     />
                                 </div>
+
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Department</label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                        Department <span className="text-red-500">*</span>
+                                    </label>
                                     <select
                                         required
-                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-900"
                                         value={form.department}
                                         onChange={(e) => setForm({ ...form, department: e.target.value })}
                                     >
@@ -272,11 +295,14 @@ const StaffRequisition = () => {
                                         {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                                     </select>
                                 </div>
+
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Location</label>
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                        Location / Counter <span className="text-red-500">*</span>
+                                    </label>
                                     <select
                                         required
-                                        className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-900"
                                         value={form.location_id}
                                         onChange={(e) => setForm({ ...form, location_id: e.target.value })}
                                     >
@@ -284,15 +310,22 @@ const StaffRequisition = () => {
                                         {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                                     </select>
                                 </div>
+
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Urgency</label>
-                                    <div className="flex gap-2">
+                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                        Urgency Level
+                                    </label>
+                                    <div className="grid grid-cols-4 gap-1.5">
                                         {URGENCY_OPTIONS.map(u => (
                                             <button
                                                 key={u}
                                                 type="button"
                                                 onClick={() => setForm({ ...form, urgency: u })}
-                                                className={`flex-1 py-2 rounded-lg text-xs font-semibold transition border ${form.urgency === u ? URGENCY_STYLES[u] + ' border-current' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'}`}
+                                                className={`py-2 rounded-none text-[11px] font-bold uppercase transition border ${
+                                                    form.urgency === u
+                                                        ? URGENCY_STYLES[u]
+                                                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                                                }`}
                                             >
                                                 {u}
                                             </button>
@@ -302,130 +335,196 @@ const StaffRequisition = () => {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1.5">Notes (optional)</label>
+                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                    Notes (Optional)
+                                </label>
                                 <textarea
                                     rows={2}
-                                    placeholder="Additional notes for the store manager..."
-                                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                    placeholder="Add batch preference, cold-chain handling note, or urgent requirements..."
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-900 resize-none"
                                     value={form.notes}
                                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                                 />
                             </div>
                         </div>
 
-                        {/* Items */}
-                        <div className="p-6">
-                            {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg border border-red-100 text-sm">{error}</div>}
-                            {success && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg border border-green-100 text-sm flex items-center gap-2"><CheckCircle2 size={18} />{success}</div>}
-
-                            <div className="grid grid-cols-12 gap-3 text-xs font-medium text-slate-500 px-1 mb-2">
-                                <div className="col-span-5">Item</div>
-                                <div className="col-span-2 text-center">Qty</div>
-                                <div className="col-span-2">Unit (Optional)</div>
-                                <div className="col-span-2">Notes</div>
-                                <div className="col-span-1"></div>
+                        {/* Items Section */}
+                        <div className="p-6 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                    Requisition Medicine List
+                                </h3>
+                                <span className="text-[11px] text-slate-500">
+                                    {form.items.length} Item line(s)
+                                </span>
                             </div>
 
-                            {form.items.map((row, index) => (
-                                <div key={index} className="grid grid-cols-12 gap-3 items-center mb-2 p-2 hover:bg-slate-50 rounded-lg transition">
-                                    <div className="col-span-5">
-                                        <select
-                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                            value={row.item_id}
-                                            onChange={(e) => updateItemRow(index, 'item_id', e.target.value)}
-                                        >
-                                            <option value="">Select Item</option>
-                                            {items.map(item => (
-                                                <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="col-span-2">
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={row.quantity}
-                                            onChange={(e) => updateItemRow(index, 'quantity', parseInt(e.target.value) || 1)}
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <input
-                                            type="text"
-                                            placeholder="strip, box..."
-                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={row.packaging_unit || ''}
-                                            onChange={(e) => updateItemRow(index, 'packaging_unit', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <input
-                                            type="text"
-                                            placeholder="Optional"
-                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                            value={row.notes}
-                                            onChange={(e) => updateItemRow(index, 'notes', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="col-span-1 flex justify-center">
-                                        <button type="button" onClick={() => removeItemRow(index)} disabled={form.items.length === 1} className="text-slate-300 hover:text-red-500 transition disabled:opacity-30">
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
+                            {error && (
+                                <div className="p-3 bg-rose-50 border border-rose-300 text-rose-800 text-xs rounded-none">
+                                    {error}
                                 </div>
-                            ))}
+                            )}
 
-                            <button type="button" onClick={addItemRow} className="flex items-center gap-2 text-blue-600 font-medium text-sm hover:bg-blue-50 py-2 px-3 rounded-lg mt-3 transition">
-                                <Plus size={16} /> Add Item
+                            {success && (
+                                <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-none flex items-center gap-2">
+                                    <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
+                                    <span>{success}</span>
+                                </div>
+                            )}
+
+                            <div className="border border-slate-200 overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold uppercase text-[10px]">
+                                            <th className="py-2.5 px-3">Medicine / Item</th>
+                                            <th className="py-2.5 px-3 w-28 text-center">Quantity</th>
+                                            <th className="py-2.5 px-3 w-36">Unit (e.g. strip/box)</th>
+                                            <th className="py-2.5 px-3">Line Notes</th>
+                                            <th className="py-2.5 px-3 w-12 text-center">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {form.items.map((row, index) => (
+                                            <tr key={index} className="hover:bg-slate-50">
+                                                <td className="p-2">
+                                                    <select
+                                                        required
+                                                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-800"
+                                                        value={row.item_id}
+                                                        onChange={(e) => updateItemRow(index, 'item_id', e.target.value)}
+                                                    >
+                                                        <option value="">Select Medicine Item</option>
+                                                        {items.map(item => (
+                                                            <option key={item.id} value={item.id}>
+                                                                {item.name} ({item.unit}) - SKU: {item.sku || 'N/A'}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+                                                <td className="p-2">
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        required
+                                                        className="w-full px-2 py-1.5 border border-slate-300 rounded-none text-center text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-800"
+                                                        value={row.quantity}
+                                                        onChange={(e) => updateItemRow(index, 'quantity', parseInt(e.target.value) || 1)}
+                                                    />
+                                                </td>
+                                                <td className="p-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="strip, box, vial"
+                                                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-800"
+                                                        value={row.packaging_unit || ''}
+                                                        onChange={(e) => updateItemRow(index, 'packaging_unit', e.target.value)}
+                                                    />
+                                                </td>
+                                                <td className="p-2">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Optional item note"
+                                                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-800"
+                                                        value={row.notes}
+                                                        onChange={(e) => updateItemRow(index, 'notes', e.target.value)}
+                                                    />
+                                                </td>
+                                                <td className="p-2 text-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeItemRow(index)}
+                                                        disabled={form.items.length === 1}
+                                                        className="text-slate-400 hover:text-rose-600 disabled:opacity-20 transition"
+                                                        title="Remove Row"
+                                                    >
+                                                        <Trash2 size={15} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={addItemRow}
+                                className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3 py-1.5 rounded-none transition"
+                            >
+                                <Plus size={14} />
+                                <span>Add Another Medicine</span>
                             </button>
                         </div>
 
-                        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
-                            <button type="submit" disabled={loading} className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-70">
-                                {loading ? 'Submitting...' : <><Send size={18} /> Submit Requisition</>}
+                        <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end">
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-6 py-2.5 rounded-none font-bold text-xs uppercase tracking-wider transition disabled:opacity-50"
+                            >
+                                {loading ? 'Submitting Requisition...' : (
+                                    <>
+                                        <Send size={14} />
+                                        <span>Submit Requisition Request</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </form>
                 )}
 
-                {/* ─── MY REQUESTS HISTORY ─── */}
+                {/* ─── MY REQUESTS HISTORY (Sharp Zoho Theme) ─── */}
                 {activeTab === 'history' && (
                     <div className="space-y-3">
                         {!form.requested_by && (
-                            <div className="p-8 bg-white rounded-xl text-center text-slate-400">
-                                Enter your name in the form first to see your requests.
+                            <div className="p-8 bg-white border border-slate-300 rounded-none text-center text-slate-500 text-xs">
+                                Enter your requester name in the form first to view your requisitions.
                             </div>
                         )}
 
                         {form.requested_by && myRequests.length === 0 && (
-                            <div className="p-8 bg-white rounded-xl text-center text-slate-400">
-                                <ClipboardList size={40} className="mx-auto mb-3 text-slate-300" />
-                                No requisitions found.
+                            <div className="p-10 bg-white border border-slate-300 rounded-none text-center text-slate-500">
+                                <ClipboardList size={36} className="mx-auto mb-2 text-slate-400" />
+                                <p className="text-xs font-semibold text-slate-700">No requisitions recorded yet.</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Submit your first medicine requisition above.</p>
                             </div>
                         )}
 
                         {myRequests.map(req => (
-                            <div key={req.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-3">
-                                        <span className="font-semibold text-slate-800">{req.requisition_number}</span>
-                                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[req.status]}`}>{req.status}</span>
-                                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${URGENCY_STYLES[req.urgency]}`}>{req.urgency}</span>
+                            <div key={req.id} className="bg-white rounded-none border border-slate-300 p-4 shadow-2xs space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2.5">
+                                        <span className="font-mono text-xs font-bold text-slate-900">{req.requisition_number}</span>
+                                        <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-none ${STATUS_STYLES[req.status]}`}>
+                                            {req.status}
+                                        </span>
+                                        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-none ${URGENCY_STYLES[req.urgency]}`}>
+                                            {req.urgency}
+                                        </span>
                                     </div>
-                                    <span className="text-xs text-slate-400">{new Date(req.created_at).toLocaleDateString()}</span>
+                                    <span className="text-[11px] text-slate-400">{new Date(req.created_at).toLocaleDateString()}</span>
                                 </div>
-                                <div className="text-sm text-slate-500 mb-2">
-                                    {req.department} • {req.location_name} • {req.items.length} item(s)
+                                
+                                <div className="text-xs text-slate-600">
+                                    <span className="font-semibold text-slate-800">{req.department}</span> • Counter: {req.location_name} • {req.items?.length || 0} Line item(s)
                                 </div>
+
                                 {req.rejection_reason && (
-                                    <div className="text-sm text-red-600 bg-red-50 rounded-lg p-2 mt-2 flex items-start gap-2">
-                                        <XCircle size={16} className="mt-0.5 shrink-0" /> {req.rejection_reason}
+                                    <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 p-2.5 flex items-start gap-2 rounded-none">
+                                        <XCircle size={15} className="mt-0.5 shrink-0 text-rose-600" />
+                                        <span>Rejection Reason: {req.rejection_reason}</span>
                                     </div>
                                 )}
+
                                 {req.status === 'PENDING' && (
-                                    <button onClick={() => handleCancel(req.id)} className="mt-2 text-xs text-slate-400 hover:text-red-500 transition">
-                                        Cancel Request
-                                    </button>
+                                    <div className="pt-1">
+                                        <button
+                                            onClick={() => handleCancel(req.id)}
+                                            className="text-xs text-rose-600 hover:text-rose-800 font-semibold transition"
+                                        >
+                                            Cancel Request
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         ))}

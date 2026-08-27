@@ -17,7 +17,9 @@ import {
     FileCheck2,
     Power,
     Percent,
-    Tag
+    Tag,
+    X,
+    Loader2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGuest } from '../../context/GuestContext';
@@ -140,10 +142,10 @@ export default function OrganizationSettings() {
                             },
                             {
                                 id: 2,
-                                name: 'Cold-Chain Biological Storage',
+                                name: 'Cold Storage Vault (Biologics)',
                                 type: 'cold_storage',
                                 region: 'Delhi NCR',
-                                address: 'Backroom Fridge 2-8°C',
+                                address: 'Basement Storage A',
                                 phone: '+91 98765 43211',
                                 pincode: '110001',
                                 radius_meters: 100,
@@ -154,11 +156,13 @@ export default function OrganizationSettings() {
                         active_branches: 2,
                     });
                 } else {
-                    setError('Unable to fetch organization profile. Please ensure you are logged in as an administrator.');
+                    setError('Unauthorized. Please log in as an administrator.');
                 }
+            } else {
+                setError('Failed to load store organization settings.');
             }
         } catch (err) {
-            setError(err.message || 'Error fetching store profile');
+            setError(err.message || 'Network error loading store settings.');
         } finally {
             setLoading(false);
         }
@@ -166,21 +170,22 @@ export default function OrganizationSettings() {
 
     useEffect(() => {
         fetchOrgData();
-    }, []);
+    }, [isGuest]);
 
     const handleSaveProfile = async (e) => {
         e.preventDefault();
         if (isGuest) {
-            showAuthModal('Sign in to update your medical store profile');
+            showAuthModal('Sign in as Admin to update store profile.');
             return;
         }
 
         setSaving(true);
         setMessage(null);
         setError(null);
+
         try {
             const res = await fetch('/api/admin/organization', {
-                method: 'PUT',
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -192,18 +197,18 @@ export default function OrganizationSettings() {
                     email: orgData.email,
                     gstin: orgData.gstin,
                     dl_number: orgData.dl_number,
-                    settings: orgData.settings,
                 }),
             });
+
             const json = await res.json();
             if (res.ok && json.success) {
                 setMessage('Store profile updated successfully.');
-                fetchOrgData();
+                setTimeout(() => setMessage(null), 3000);
             } else {
-                setError(json.detail || json.message || 'Failed to update store profile');
+                setError(json.detail || json.message || 'Failed to update store profile.');
             }
         } catch (err) {
-            setError(err.message || 'Error saving profile');
+            setError(err.message || 'Network error saving store profile.');
         } finally {
             setSaving(false);
         }
@@ -211,14 +216,14 @@ export default function OrganizationSettings() {
 
     const handleOpenAddBranch = () => {
         if (isGuest) {
-            showAuthModal('Sign in to add store branches');
+            showAuthModal('Sign in to add new branch counters.');
             return;
         }
         setEditingBranch(null);
         setBranchForm({
             name: '',
             type: 'retail_counter',
-            region: 'North',
+            region: 'Default Region',
             address: '',
             phone: '',
             pincode: '',
@@ -229,14 +234,14 @@ export default function OrganizationSettings() {
 
     const handleOpenEditBranch = (branch) => {
         if (isGuest) {
-            showAuthModal('Sign in to edit store branches');
+            showAuthModal('Sign in to edit branch locations.');
             return;
         }
         setEditingBranch(branch);
         setBranchForm({
-            name: branch.name,
-            type: branch.type,
-            region: branch.region,
+            name: branch.name || '',
+            type: branch.type || 'retail_counter',
+            region: branch.region || 'Default Region',
             address: branch.address || '',
             phone: branch.phone || '',
             pincode: branch.pincode || '',
@@ -249,11 +254,12 @@ export default function OrganizationSettings() {
         e.preventDefault();
         setBranchSaving(true);
         setError(null);
+
         try {
             const url = editingBranch
                 ? `/api/inventory/locations/${editingBranch.id}`
                 : '/api/inventory/locations';
-            const method = editingBranch ? 'PUT' : 'POST';
+            const method = editingBranch ? 'PATCH' : 'POST';
 
             const res = await fetch(url, {
                 method,
@@ -263,16 +269,18 @@ export default function OrganizationSettings() {
                 credentials: 'include',
                 body: JSON.stringify(branchForm),
             });
+
             const json = await res.json();
             if (res.ok && json.success) {
-                setMessage(editingBranch ? 'Branch updated successfully' : 'New branch created successfully');
+                setMessage(editingBranch ? 'Branch updated successfully.' : 'New branch created successfully.');
                 setIsBranchModalOpen(false);
                 fetchOrgData();
+                setTimeout(() => setMessage(null), 3000);
             } else {
-                setError(json.detail || json.message || 'Failed to save branch');
+                setError(json.detail || json.message || 'Failed to save branch counter.');
             }
         } catch (err) {
-            setError(err.message || 'Error saving branch');
+            setError(err.message || 'Error saving branch counter.');
         } finally {
             setBranchSaving(false);
         }
@@ -280,23 +288,24 @@ export default function OrganizationSettings() {
 
     const handleToggleBranchActive = async (branch) => {
         if (isGuest) {
-            showAuthModal('Sign in to toggle branch active status');
+            showAuthModal('Sign in to manage branch counter status.');
             return;
         }
         try {
-            const res = await fetch(`/api/inventory/locations/${branch.id}/toggle-active`, {
+            const res = await fetch(`/api/inventory/locations/${branch.id}`, {
                 method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
+                body: JSON.stringify({ is_active: !branch.is_active }),
             });
             const json = await res.json();
             if (res.ok && json.success) {
-                setMessage(json.message);
                 fetchOrgData();
             } else {
-                setError(json.detail || json.message || 'Failed to change branch status');
+                setError(json.detail || json.message || 'Failed to update branch status.');
             }
         } catch (err) {
-            setError(err.message || 'Error updating branch status');
+            setError(err.message || 'Error updating branch status.');
         }
     };
 
@@ -314,11 +323,12 @@ export default function OrganizationSettings() {
                 setMessage(json.message);
                 setDeleteCandidate(null);
                 fetchOrgData();
+                setTimeout(() => setMessage(null), 3000);
             } else {
-                setError(json.detail || json.message || 'Failed to delete/archive branch');
+                setError(json.detail || json.message || 'Failed to delete/archive branch.');
             }
         } catch (err) {
-            setError(err.message || 'Error deleting branch');
+            setError(err.message || 'Error deleting branch.');
         } finally {
             setDeleting(false);
         }
@@ -350,12 +360,13 @@ export default function OrganizationSettings() {
             const json = await res.json();
             if (res.ok && json.success) {
                 setDiscountMsg('Discount policy saved successfully.');
+                setTimeout(() => setDiscountMsg(null), 3000);
             } else {
                 const errs = json.detail?.errors || [json.detail || json.message || 'Failed to save'];
-                setDiscountErr(Array.isArray(errs) ? errs.join(' \u2022 ') : String(errs));
+                setDiscountErr(Array.isArray(errs) ? errs.join(' • ') : String(errs));
             }
         } catch (e) {
-            setDiscountErr(e.message || 'Error saving discount policy');
+            setDiscountErr(e.message || 'Error saving discount policy.');
         } finally {
             setDiscountSaving(false);
         }
@@ -375,36 +386,36 @@ export default function OrganizationSettings() {
     };
 
     return (
-        <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+        <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-150">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
                 <div>
-                    <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
-                        <Store size={14} />
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">
+                        <Store size={14} className="text-slate-900" />
                         <span>Pharmacy Business & Branches</span>
                     </div>
-                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    <h1 className="text-2xl font-black text-slate-900 tracking-tight">
                         Store Profile & Counter Setup
                     </h1>
-                    <p className="text-sm text-slate-500 mt-0.5">
+                    <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
                         Manage your chemist legal profile, drug licenses, GSTIN, and branch locations.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                     <button
                         onClick={fetchOrgData}
                         disabled={loading}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-xs"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-none hover:bg-slate-100 transition-colors"
                     >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                         <span>Refresh</span>
                     </button>
                     <button
                         onClick={handleOpenAddBranch}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-all shadow-sm shadow-blue-500/20"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 border border-slate-900 rounded-none hover:bg-black transition-all"
                     >
-                        <Plus size={16} />
+                        <Plus size={14} />
                         <span>Add Branch Counter</span>
                     </button>
                 </div>
@@ -412,24 +423,24 @@ export default function OrganizationSettings() {
 
             {/* Notification messages */}
             {message && (
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center justify-between animate-in fade-in">
+                <div className="p-3.5 rounded-none bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-medium flex items-center justify-between animate-in fade-in">
                     <div className="flex items-center gap-2">
-                        <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                        <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
                         <span>{message}</span>
                     </div>
-                    <button onClick={() => setMessage(null)} className="text-xs font-semibold text-emerald-700 hover:underline">
+                    <button onClick={() => setMessage(null)} className="text-xs font-bold text-emerald-800 hover:underline">
                         Dismiss
                     </button>
                 </div>
             )}
 
             {error && (
-                <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-center justify-between animate-in fade-in">
+                <div className="p-3.5 rounded-none bg-rose-50 border border-rose-300 text-rose-900 text-xs font-medium flex items-center justify-between animate-in fade-in">
                     <div className="flex items-center gap-2">
-                        <AlertCircle size={18} className="text-rose-600 shrink-0" />
+                        <AlertCircle size={16} className="text-rose-700 shrink-0" />
                         <span>{error}</span>
                     </div>
-                    <button onClick={() => setError(null)} className="text-xs font-semibold text-rose-700 hover:underline">
+                    <button onClick={() => setError(null)} className="text-xs font-bold text-rose-800 hover:underline">
                         Dismiss
                     </button>
                 </div>
@@ -437,15 +448,16 @@ export default function OrganizationSettings() {
 
             {/* Main Content Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* ── Left Column: Pharmacy Business Profile ────────────────────── */}
+                {/* ── Left Column: Pharmacy Business Profile & Discount Policy ── */}
                 <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-5">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    {/* Store Profile Card */}
+                    <div className="bg-white border border-slate-300 rounded-none p-6 space-y-5">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                             <div className="flex items-center gap-2">
-                                <Building2 size={18} className="text-blue-600" />
-                                <h2 className="text-base font-bold text-slate-900">Store Profile</h2>
+                                <Building2 size={16} className="text-slate-900" />
+                                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Store Profile</h2>
                             </div>
-                            <span className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-none bg-slate-100 text-slate-800 border border-slate-300">
                                 {orgData.plan.replace('_', ' ')}
                             </span>
                         </div>
@@ -453,7 +465,7 @@ export default function OrganizationSettings() {
                         <form onSubmit={handleSaveProfile} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                    Pharmacy / Store Name *
+                                    Pharmacy / Store Name <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
@@ -461,7 +473,7 @@ export default function OrganizationSettings() {
                                     value={orgData.name}
                                     onChange={(e) => setOrgData({ ...orgData, name: e.target.value })}
                                     placeholder="e.g. Sharma Medicos & Chemist"
-                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900"
                                 />
                             </div>
 
@@ -470,13 +482,13 @@ export default function OrganizationSettings() {
                                     Drug License No. (DL No.)
                                 </label>
                                 <div className="relative">
-                                    <FileBadge className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                                    <FileBadge className="absolute left-3 top-2.5 text-slate-400" size={15} />
                                     <input
                                         type="text"
                                         value={orgData.dl_number}
                                         onChange={(e) => setOrgData({ ...orgData, dl_number: e.target.value })}
                                         placeholder="e.g. DL-20B-12345 / 21B-67890"
-                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 font-mono text-xs"
                                     />
                                 </div>
                             </div>
@@ -486,13 +498,13 @@ export default function OrganizationSettings() {
                                     GSTIN / Tax ID
                                 </label>
                                 <div className="relative">
-                                    <FileCheck2 className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                                    <FileCheck2 className="absolute left-3 top-2.5 text-slate-400" size={15} />
                                     <input
                                         type="text"
                                         value={orgData.gstin}
                                         onChange={(e) => setOrgData({ ...orgData, gstin: e.target.value })}
                                         placeholder="e.g. 07AAAAA0000A1Z5"
-                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 uppercase"
+                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 font-mono text-xs uppercase"
                                     />
                                 </div>
                             </div>
@@ -503,13 +515,13 @@ export default function OrganizationSettings() {
                                         Contact Phone
                                     </label>
                                     <div className="relative">
-                                        <Phone className="absolute left-3 top-2.5 text-slate-400" size={15} />
+                                        <Phone className="absolute left-3 top-2.5 text-slate-400" size={14} />
                                         <input
                                             type="text"
                                             value={orgData.phone}
                                             onChange={(e) => setOrgData({ ...orgData, phone: e.target.value })}
                                             placeholder="+91 98765..."
-                                            className="w-full pl-8 pr-2 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                            className="w-full pl-8 pr-2 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs"
                                         />
                                     </div>
                                 </div>
@@ -518,13 +530,13 @@ export default function OrganizationSettings() {
                                         Store Email
                                     </label>
                                     <div className="relative">
-                                        <Mail className="absolute left-3 top-2.5 text-slate-400" size={15} />
+                                        <Mail className="absolute left-3 top-2.5 text-slate-400" size={14} />
                                         <input
                                             type="email"
                                             value={orgData.email}
                                             onChange={(e) => setOrgData({ ...orgData, email: e.target.value })}
                                             placeholder="store@domain..."
-                                            className="w-full pl-8 pr-2 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                            className="w-full pl-8 pr-2 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs"
                                         />
                                     </div>
                                 </div>
@@ -535,13 +547,13 @@ export default function OrganizationSettings() {
                                     Headquarters / Main Store Address
                                 </label>
                                 <div className="relative">
-                                    <MapPin className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                                    <MapPin className="absolute left-3 top-2.5 text-slate-400" size={15} />
                                     <textarea
                                         rows={3}
                                         value={orgData.address}
                                         onChange={(e) => setOrgData({ ...orgData, address: e.target.value })}
                                         placeholder="Full street address, market name, city, state"
-                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs"
                                     />
                                 </div>
                             </div>
@@ -549,71 +561,71 @@ export default function OrganizationSettings() {
                             <button
                                 type="submit"
                                 disabled={saving}
-                                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2"
+                                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-none transition-all flex items-center justify-center gap-2"
                             >
-                                <Save size={15} />
+                                {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={14} />}
                                 <span>{saving ? 'Saving Profile...' : 'Save Store Profile'}</span>
                             </button>
                         </form>
                     </div>
 
                     {/* Summary metrics card */}
-                    <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-5 space-y-3">
+                    <div className="bg-slate-50 border border-slate-300 rounded-none p-4 space-y-3">
                         <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Branch Summary</h3>
                         <div className="grid grid-cols-2 gap-3 text-center">
-                            <div className="p-3 bg-white border border-slate-200 rounded-xl">
+                            <div className="p-3 bg-white border border-slate-300 rounded-none">
                                 <p className="text-2xl font-black text-slate-900">{orgData.total_branches}</p>
-                                <p className="text-[11px] text-slate-500 font-medium">Total Branches</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Branches</p>
                             </div>
-                            <div className="p-3 bg-white border border-slate-200 rounded-xl">
-                                <p className="text-2xl font-black text-emerald-600">{orgData.active_branches}</p>
-                                <p className="text-[11px] text-slate-500 font-medium">Active Counters</p>
+                            <div className="p-3 bg-white border border-slate-300 rounded-none">
+                                <p className="text-2xl font-black text-slate-900">{orgData.active_branches}</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Active Counters</p>
                             </div>
                         </div>
                     </div>
 
-                    {/* ── Discount Policy Card ─────────────────────────── */}
-                    <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-4">
-                        <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                            <Tag size={17} className="text-violet-600" />
-                            <h2 className="text-base font-bold text-slate-900">Customer Discount Policy</h2>
+                    {/* ── Customer Discount Policy Card ─────────────────────────── */}
+                    <div className="bg-white border border-slate-300 rounded-none p-6 space-y-4">
+                        <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+                            <Tag size={16} className="text-slate-900" />
+                            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Customer Discount Policy</h2>
                         </div>
 
                         {discountMsg && (
-                            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in">
-                                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                            <div className="p-3 rounded-none bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs flex items-center gap-2 animate-in fade-in">
+                                <CheckCircle2 size={14} className="text-emerald-700 shrink-0" />
                                 <span>{discountMsg}</span>
-                                <button onClick={() => setDiscountMsg(null)} className="ml-auto text-emerald-700 font-semibold">✕</button>
+                                <button onClick={() => setDiscountMsg(null)} className="ml-auto text-emerald-800 font-bold">✕</button>
                             </div>
                         )}
                         {discountErr && (
-                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 animate-in fade-in">
-                                <AlertCircle size={13} className="text-rose-600 shrink-0" />
+                            <div className="p-3 rounded-none bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-center gap-2 animate-in fade-in">
+                                <AlertCircle size={14} className="text-rose-700 shrink-0" />
                                 <span>{discountErr}</span>
-                                <button onClick={() => setDiscountErr(null)} className="ml-auto text-rose-700 font-semibold">✕</button>
+                                <button onClick={() => setDiscountErr(null)} className="ml-auto text-rose-800 font-bold">✕</button>
                             </div>
                         )}
 
                         {/* Model selector */}
                         <div className="space-y-2">
-                            <p className="text-xs font-semibold text-slate-700">Discount Model</p>
+                            <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Discount Model</p>
                             {[
                                 ['none',   'No Discount (Full MRP always)'],
                                 ['flat',   'Flat % — same % off every bill'],
                                 ['tiered', 'Tiered Slabs — % based on bill total'],
                             ].map(([val, label]) => (
-                                <label key={val} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                <label key={val} className={`flex items-center gap-3 p-2.5 rounded-none border cursor-pointer transition-all ${
                                     discountModel === val
-                                        ? 'border-violet-400 bg-violet-50 shadow-sm shadow-violet-100'
-                                        : 'border-slate-200 hover:border-slate-300'
+                                        ? 'border-slate-900 bg-slate-100 font-semibold'
+                                        : 'border-slate-300 hover:border-slate-400 bg-white'
                                 }`}>
                                     <input
                                         type="radio" name="discount_model" value={val}
                                         checked={discountModel === val}
                                         onChange={() => setDiscountModel(val)}
-                                        className="accent-violet-600"
+                                        className="accent-slate-900"
                                     />
-                                    <span className="text-xs font-medium text-slate-800">{label}</span>
+                                    <span className="text-xs text-slate-900">{label}</span>
                                 </label>
                             ))}
                         </div>
@@ -625,13 +637,13 @@ export default function OrganizationSettings() {
                                     Flat Discount Percentage
                                 </label>
                                 <div className="relative">
-                                    <Percent className="absolute left-3 top-2.5 text-violet-500" size={13} />
+                                    <Percent className="absolute left-3 top-2.5 text-slate-400" size={13} />
                                     <input
                                         type="number" min="0.1" max="100" step="0.5"
                                         value={flatPct}
                                         onChange={e => setFlatPct(e.target.value)}
                                         placeholder="e.g. 10"
-                                        className="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 text-slate-900"
+                                        className="w-full pl-8 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 font-mono"
                                     />
                                 </div>
                                 <p className="text-[11px] text-slate-400 mt-1.5">
@@ -643,36 +655,36 @@ export default function OrganizationSettings() {
                         {/* Tiered model: slab table */}
                         {discountModel === 'tiered' && (
                             <div className="space-y-3">
-                                <p className="text-xs font-semibold text-slate-700">Discount Slabs</p>
+                                <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Discount Slabs</p>
                                 <div className="space-y-2">
                                     {tieredSlabs.map((slab, idx) => (
-                                        <div key={idx} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl p-2">
-                                            <span className="text-[11px] text-slate-400 shrink-0">₹</span>
+                                        <div key={idx} className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-none p-2">
+                                            <span className="text-[11px] font-bold text-slate-500 shrink-0">₹</span>
                                             <input
-                                                type="number" placeholder="Min bill"
+                                                type="number" placeholder="Min"
                                                 value={slab.min_bill ?? ''}
                                                 onChange={e => updateSlab(idx, 'min_bill', e.target.value)}
-                                                className="w-20 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                                className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-none text-slate-900 bg-white focus:outline-none focus:border-slate-900 font-mono"
                                             />
                                             <span className="text-[11px] text-slate-400">–</span>
                                             <input
-                                                type="number" placeholder="Max (blank=∞)"
+                                                type="number" placeholder="Max (∞)"
                                                 value={slab.max_bill ?? ''}
                                                 onChange={e => updateSlab(idx, 'max_bill', e.target.value === '' ? null : e.target.value)}
-                                                className="w-24 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                                className="w-24 px-2 py-1 text-xs border border-slate-300 rounded-none text-slate-900 bg-white focus:outline-none focus:border-slate-900 font-mono"
                                             />
                                             <span className="text-[11px] text-slate-400">→</span>
                                             <input
                                                 type="number" min="0" max="100" step="0.5" placeholder="%"
                                                 value={slab.discount_pct ?? ''}
                                                 onChange={e => updateSlab(idx, 'discount_pct', e.target.value)}
-                                                className="w-14 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:border-violet-400"
+                                                className="w-14 px-2 py-1 text-xs border border-slate-300 rounded-none text-slate-900 bg-white focus:outline-none focus:border-slate-900 font-mono"
                                             />
-                                            <span className="text-[11px] text-slate-400">%</span>
+                                            <span className="text-[11px] text-slate-600 font-bold">%</span>
                                             <button
                                                 onClick={() => removeSlab(idx)}
                                                 disabled={tieredSlabs.length === 1}
-                                                className="ml-auto p-1 text-rose-400 hover:text-rose-600 transition-colors disabled:opacity-30"
+                                                className="ml-auto p-1 text-slate-400 hover:text-rose-600 transition-colors disabled:opacity-30"
                                                 title="Remove slab"
                                             ><Trash2 size={12} /></button>
                                         </div>
@@ -680,18 +692,18 @@ export default function OrganizationSettings() {
                                 </div>
                                 <button
                                     onClick={addSlab}
-                                    className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 transition-colors"
+                                    className="flex items-center gap-1.5 text-xs font-bold text-slate-800 hover:text-black transition-colors"
                                 >
                                     <Plus size={13} /> Add Slab
                                 </button>
                                 <p className="text-[11px] text-slate-400">
-                                    Leave Max blank for the highest slab (no ceiling). System checks slabs top-to-bottom.
+                                    Leave Max blank for highest slab (no ceiling). Slabs are evaluated top-to-bottom.
                                 </p>
                             </div>
                         )}
 
                         {discountModel === 'none' && (
-                            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
+                            <p className="text-xs text-slate-500 bg-slate-50 rounded-none px-3.5 py-3 border border-slate-200">
                                 No discount applied. Customers pay full MRP on every bill.
                             </p>
                         )}
@@ -699,27 +711,27 @@ export default function OrganizationSettings() {
                         <button
                             onClick={handleSaveDiscount}
                             disabled={discountSaving}
-                            className="w-full py-2.5 px-4 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-300 text-white font-semibold text-xs rounded-xl transition-all shadow-xs shadow-violet-500/20 flex items-center justify-center gap-2"
+                            className="w-full py-2.5 px-4 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-none transition-all flex items-center justify-center gap-2"
                         >
-                            <Save size={13} />
-                            {discountSaving ? 'Saving Policy...' : 'Save Discount Policy'}
+                            {discountSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                            <span>{discountSaving ? 'Saving Policy...' : 'Save Discount Policy'}</span>
                         </button>
                     </div>
                 </div>
 
                 {/* ── Right Column: Branch & Counter Management ───────────────── */}
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs p-6 space-y-5">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div className="bg-white border border-slate-300 rounded-none p-6 space-y-5">
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
                             <div>
-                                <h2 className="text-base font-bold text-slate-900">Branch & Counter Locations</h2>
+                                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Branch & Counter Locations</h2>
                                 <p className="text-xs text-slate-500 mt-0.5">
                                     Counter staff and medicine stocks are strictly partitioned across these locations.
                                 </p>
                             </div>
                             <button
                                 onClick={handleOpenAddBranch}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-900 bg-slate-100 border border-slate-300 rounded-none hover:bg-slate-200 transition-colors"
                             >
                                 <Plus size={14} />
                                 <span>Add Branch</span>
@@ -731,15 +743,15 @@ export default function OrganizationSettings() {
                                 Loading branches...
                             </div>
                         ) : orgData.branches.length === 0 ? (
-                            <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-3">
-                                <Store className="w-10 h-10 text-slate-300 mx-auto" />
+                            <div className="p-8 text-center border-2 border-dashed border-slate-300 rounded-none space-y-3">
+                                <Store className="w-8 h-8 text-slate-400 mx-auto" />
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-700">No branch counters configured</p>
-                                    <p className="text-xs text-slate-400 mt-1">Add your main pharmacy counter to begin dispensing medicines.</p>
+                                    <p className="text-xs font-bold text-slate-800 uppercase tracking-wider">No branch counters configured</p>
+                                    <p className="text-xs text-slate-500 mt-1">Add your main pharmacy counter to begin dispensing medicines.</p>
                                 </div>
                                 <button
                                     onClick={handleOpenAddBranch}
-                                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700"
+                                    className="px-4 py-2 text-xs font-bold text-white bg-slate-900 rounded-none hover:bg-black"
                                 >
                                     Create Primary Counter
                                 </button>
@@ -749,10 +761,10 @@ export default function OrganizationSettings() {
                                 {orgData.branches.map((b) => (
                                     <div
                                         key={b.id}
-                                        className={`p-4 rounded-xl border transition-all flex flex-col justify-between ${
+                                        className={`p-4 rounded-none border transition-all flex flex-col justify-between ${
                                             b.is_active
-                                                ? 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-xs'
-                                                : 'bg-slate-50/80 border-slate-200/70 opacity-70'
+                                                ? 'bg-white border-slate-300 hover:border-slate-800'
+                                                : 'bg-slate-50 border-slate-200 opacity-70'
                                         }`}
                                     >
                                         <div className="space-y-2">
@@ -766,9 +778,9 @@ export default function OrganizationSettings() {
                                                     </h3>
                                                 </div>
                                                 <span
-                                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                    className={`px-2 py-0.5 rounded-none text-[10px] font-bold uppercase tracking-wider ${
                                                         b.is_active
-                                                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                            ? 'bg-slate-900 text-white'
                                                             : 'bg-slate-200 text-slate-600'
                                                     }`}
                                                 >
@@ -776,52 +788,52 @@ export default function OrganizationSettings() {
                                                 </span>
                                             </div>
 
-                                            <div className="text-xs text-slate-500 space-y-1 pt-1">
+                                            <div className="text-xs text-slate-600 space-y-1 pt-1 font-sans">
                                                 <p className="flex items-center gap-1.5">
-                                                    <span className="font-semibold text-slate-700">Type:</span>
+                                                    <span className="font-semibold text-slate-800">Type:</span>
                                                     <span className="capitalize">{b.type.replace('_', ' ')}</span>
                                                 </p>
                                                 {b.address && (
                                                     <p className="truncate" title={b.address}>
-                                                        <span className="font-semibold text-slate-700">Address:</span> {b.address}
+                                                        <span className="font-semibold text-slate-800">Address:</span> {b.address}
                                                     </p>
                                                 )}
                                                 {b.phone && (
                                                     <p>
-                                                        <span className="font-semibold text-slate-700">Phone:</span> {b.phone}
+                                                        <span className="font-semibold text-slate-800">Phone:</span> {b.phone}
                                                     </p>
                                                 )}
                                                 <p>
-                                                    <span className="font-semibold text-slate-700">Radius:</span> {b.radius_meters || 500}m counter boundary
+                                                    <span className="font-semibold text-slate-800">Radius:</span> {b.radius_meters || 500}m counter boundary
                                                 </p>
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center justify-between pt-4 mt-3 border-t border-slate-100">
+                                        <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-200">
                                             <button
                                                 onClick={() => handleToggleBranchActive(b)}
-                                                className={`text-[11px] font-semibold flex items-center gap-1 hover:underline ${
-                                                    b.is_active ? 'text-amber-600' : 'text-emerald-600'
+                                                className={`text-[11px] font-bold flex items-center gap-1 hover:underline ${
+                                                    b.is_active ? 'text-amber-700' : 'text-slate-900'
                                                 }`}
                                             >
-                                                <Power size={13} />
+                                                <Power size={12} />
                                                 <span>{b.is_active ? 'Deactivate' : 'Activate'}</span>
                                             </button>
 
                                             <div className="flex items-center gap-1">
                                                 <button
                                                     onClick={() => handleOpenEditBranch(b)}
-                                                    className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                                                    className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-none transition-colors"
                                                     title="Edit branch"
                                                 >
-                                                    <Edit3 size={15} />
+                                                    <Edit3 size={14} />
                                                 </button>
                                                 <button
                                                     onClick={() => setDeleteCandidate(b)}
-                                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                                    className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-none transition-colors"
                                                     title="Delete or archive branch"
                                                 >
-                                                    <Trash2 size={15} />
+                                                    <Trash2 size={14} />
                                                 </button>
                                             </div>
                                         </div>
@@ -835,24 +847,29 @@ export default function OrganizationSettings() {
 
             {/* ── Modal: Add / Edit Branch ──────────────────────────────────────── */}
             {isBranchModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
-                        <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                            <h3 className="text-base font-bold text-slate-900">
-                                {editingBranch ? `Edit Branch: ${editingBranch.name}` : 'Add New Pharmacy Branch'}
-                            </h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+                    <div className="bg-white border border-slate-300 rounded-none shadow-2xl max-w-lg w-full overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                            <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 bg-slate-900 text-white flex items-center justify-center text-xs font-bold rounded-none">
+                                    <Store size={14} />
+                                </div>
+                                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                                    {editingBranch ? `Edit Branch: ${editingBranch.name}` : 'Add New Pharmacy Branch'}
+                                </h3>
+                            </div>
                             <button
                                 onClick={() => setIsBranchModalOpen(false)}
-                                className="text-slate-400 hover:text-slate-600 text-sm"
+                                className="p-1 text-slate-400 hover:text-slate-800 transition"
                             >
-                                ✕
+                                <X size={16} />
                             </button>
                         </div>
 
                         <form onSubmit={handleSaveBranch} className="p-6 space-y-4">
                             <div>
                                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                    Branch / Counter Name *
+                                    Branch / Counter Name <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
@@ -860,7 +877,7 @@ export default function OrganizationSettings() {
                                     value={branchForm.name}
                                     onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })}
                                     placeholder="e.g. South Extension Counter"
-                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900"
                                 />
                             </div>
 
@@ -872,7 +889,7 @@ export default function OrganizationSettings() {
                                     <select
                                         value={branchForm.type}
                                         onChange={(e) => setBranchForm({ ...branchForm, type: e.target.value })}
-                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900"
                                     >
                                         <option value="retail_counter">Retail Counter</option>
                                         <option value="cold_storage">Cold Storage (2-8°C)</option>
@@ -882,7 +899,7 @@ export default function OrganizationSettings() {
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                                        Region / City *
+                                        Region / City <span className="text-red-500">*</span>
                                     </label>
                                     <input
                                         type="text"
@@ -890,7 +907,7 @@ export default function OrganizationSettings() {
                                         value={branchForm.region}
                                         onChange={(e) => setBranchForm({ ...branchForm, region: e.target.value })}
                                         placeholder="e.g. North Delhi"
-                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900"
                                     />
                                 </div>
                             </div>
@@ -905,7 +922,7 @@ export default function OrganizationSettings() {
                                         value={branchForm.phone}
                                         onChange={(e) => setBranchForm({ ...branchForm, phone: e.target.value })}
                                         placeholder="+91..."
-                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs"
                                     />
                                 </div>
                                 <div>
@@ -917,7 +934,7 @@ export default function OrganizationSettings() {
                                         value={branchForm.pincode}
                                         onChange={(e) => setBranchForm({ ...branchForm, pincode: e.target.value })}
                                         placeholder="110001"
-                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                        className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs font-mono"
                                     />
                                 </div>
                             </div>
@@ -931,7 +948,7 @@ export default function OrganizationSettings() {
                                     value={branchForm.address}
                                     onChange={(e) => setBranchForm({ ...branchForm, address: e.target.value })}
                                     placeholder="Shop number, street, landmark"
-                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 text-xs"
                                 />
                             </div>
 
@@ -945,24 +962,25 @@ export default function OrganizationSettings() {
                                     max="50000"
                                     value={branchForm.radius_meters}
                                     onChange={(e) => setBranchForm({ ...branchForm, radius_meters: parseInt(e.target.value) || 500 })}
-                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-none focus:outline-none focus:border-slate-900 text-slate-900 font-mono"
                                 />
                             </div>
 
-                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
                                 <button
                                     type="button"
                                     onClick={() => setIsBranchModalOpen(false)}
-                                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-none hover:bg-slate-100"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={branchSaving}
-                                    className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-xs"
+                                    className="px-5 py-2 text-xs font-bold text-white bg-slate-900 rounded-none hover:bg-black transition-all flex items-center gap-1.5"
                                 >
-                                    {branchSaving ? 'Saving...' : editingBranch ? 'Update Branch' : 'Add Branch'}
+                                    {branchSaving && <Loader2 size={12} className="animate-spin" />}
+                                    <span>{branchSaving ? 'Saving...' : editingBranch ? 'Update Branch' : 'Add Branch'}</span>
                                 </button>
                             </div>
                         </form>
@@ -972,23 +990,23 @@ export default function OrganizationSettings() {
 
             {/* ── Modal: Safe Delete/Archive Confirmation ──────────────────────── */}
             {deleteCandidate && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
-                    <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
-                        <div className="flex items-center gap-3 text-amber-600">
-                            <AlertCircle size={24} />
-                            <h3 className="text-base font-bold text-slate-900">Remove Branch Counter?</h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
+                    <div className="bg-white border border-slate-300 rounded-none shadow-2xl max-w-md w-full p-6 space-y-4">
+                        <div className="flex items-center gap-3 text-amber-700">
+                            <AlertCircle size={22} />
+                            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Remove Branch Counter?</h3>
                         </div>
                         <p className="text-xs text-slate-600 leading-relaxed">
                             Are you sure you want to remove <strong>{deleteCandidate.name}</strong>?
                             <br /><br />
                             <strong>Business rule:</strong> If historical stock or dispense transactions exist for this branch, it will be <strong>safely archived</strong> (deactivated) to preserve audit trails. If no transaction history exists, it will be permanently deleted.
                         </p>
-                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
                             <button
                                 type="button"
                                 disabled={deleting}
                                 onClick={() => setDeleteCandidate(null)}
-                                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-none hover:bg-slate-100"
                             >
                                 Cancel
                             </button>
@@ -996,9 +1014,10 @@ export default function OrganizationSettings() {
                                 type="button"
                                 disabled={deleting}
                                 onClick={handleConfirmDelete}
-                                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-all shadow-xs"
+                                className="px-4 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-none transition-all flex items-center gap-1.5"
                             >
-                                {deleting ? 'Processing...' : 'Confirm Removal'}
+                                {deleting && <Loader2 size={12} className="animate-spin" />}
+                                <span>{deleting ? 'Processing...' : 'Confirm Removal'}</span>
                             </button>
                         </div>
                     </div>

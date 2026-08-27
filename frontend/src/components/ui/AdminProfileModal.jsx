@@ -17,7 +17,6 @@ export default function AdminProfileModal({ isOpen, onClose }) {
     const { user, updateUser } = useAuth();
 
     const [fullName, setFullName] = useState('');
-    const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
 
     // Password change fields
@@ -33,15 +32,34 @@ export default function AdminProfileModal({ isOpen, onClose }) {
     const [passwordSuccess, setPasswordSuccess] = useState('');
 
     useEffect(() => {
-        if (user) {
-            setFullName(user.full_name || '');
-            setUsername(user.username || '');
-            setEmail(user.email || '');
+        if (isOpen) {
+            // Preload from context
+            if (user) {
+                setFullName(user.full_name || user.username || '');
+                setEmail(user.email || '');
+            }
+            // Also fetch latest fresh data from backend
+            auth.me()
+                .then((res) => {
+                    if (res?.data?.data) {
+                        const u = res.data.data;
+                        setFullName(u.full_name || u.username || '');
+                        setEmail(u.email || '');
+                        updateUser({
+                            full_name: u.full_name,
+                            email: u.email,
+                            username: u.username,
+                            organization_name: u.organization_name,
+                        });
+                    }
+                })
+                .catch(() => {});
+
             setError('');
             setSuccessMessage('');
             setPasswordSuccess('');
         }
-    }, [user, isOpen]);
+    }, [isOpen]);
 
     if (!isOpen || !user) return null;
 
@@ -59,7 +77,6 @@ export default function AdminProfileModal({ isOpen, onClose }) {
         try {
             const res = await auth.updateProfile({
                 full_name: fullName.trim(),
-                username: username.trim().toLowerCase(),
                 email: email.trim().toLowerCase(),
             });
 
@@ -67,10 +84,10 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                 const updated = res.data.data;
                 updateUser({
                     full_name: updated.full_name,
-                    username: updated.username,
                     email: updated.email,
+                    username: updated.username,
                 });
-                setSuccessMessage('Profile updated successfully!');
+                setSuccessMessage('Profile details saved successfully!');
                 setTimeout(() => {
                     setSuccessMessage('');
                 }, 3000);
@@ -139,12 +156,12 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                 {/* ── Modal Header ────────────────────────────────────────── */}
                 <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                     <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center font-bold text-xs">
+                        <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center font-bold text-xs rounded-none">
                             <User size={16} />
                         </div>
                         <div>
                             <h3 className="text-sm font-bold text-slate-900">Administrator Profile</h3>
-                            <p className="text-xs text-slate-500">Update your name, username and security settings</p>
+                            <p className="text-xs text-slate-500">Update your name and security credentials</p>
                         </div>
                     </div>
                     <button
@@ -159,21 +176,21 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                 <div className="p-6 overflow-y-auto space-y-5">
                     
                     {error && (
-                        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+                        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2 rounded-none">
                             <AlertCircle size={15} className="shrink-0 text-red-600" />
                             <span>{error}</span>
                         </div>
                     )}
 
                     {successMessage && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 rounded-none">
                             <Check size={15} className="shrink-0 text-emerald-600" />
                             <span>{successMessage}</span>
                         </div>
                     )}
 
                     {passwordSuccess && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 rounded-none">
                             <Check size={15} className="shrink-0 text-emerald-600" />
                             <span>{passwordSuccess}</span>
                         </div>
@@ -193,40 +210,25 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                                 placeholder="Enter your full name"
                                 className="w-full px-3 py-2 border border-slate-300 rounded-none text-sm text-slate-900 focus:outline-none focus:border-slate-800"
                             />
-                            <p className="text-[11px] text-slate-400 mt-0.5">This name will be used across the dashboard and InvIQ AI assistant.</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">This name is used across the dashboard and the InvIQ AI assistant.</p>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                                    Username
-                                </label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    placeholder="Username"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-none text-sm text-slate-900 focus:outline-none focus:border-slate-800"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                                    Email Address
-                                </label>
-                                <input
-                                    type="email"
-                                    required
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="admin@pharmacy.com"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-none text-sm text-slate-900 focus:outline-none focus:border-slate-800"
-                                />
-                            </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                                Email Address <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                                type="email"
+                                required
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="admin@pharmacy.com"
+                                className="w-full px-3 py-2 border border-slate-300 rounded-none text-sm text-slate-900 focus:outline-none focus:border-slate-800"
+                            />
+                            <p className="text-[11px] text-slate-400 mt-0.5">Used for authentication and important pharmacy alerts.</p>
                         </div>
 
-                        <div className="pt-1 flex items-center justify-between">
+                        <div className="pt-2 flex items-center justify-between">
                             <button
                                 type="button"
                                 onClick={() => setShowPasswordSection(!showPasswordSection)}
@@ -249,7 +251,7 @@ export default function AdminProfileModal({ isOpen, onClose }) {
 
                     {/* Change Password Section */}
                     {showPasswordSection && (
-                        <div className="pt-4 border-t border-slate-200 bg-slate-50 p-4 space-y-3">
+                        <div className="pt-4 border-t border-slate-200 bg-slate-50 p-4 space-y-3 rounded-none">
                             <div className="flex items-center gap-2">
                                 <Shield size={14} className="text-slate-700" />
                                 <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Update Account Password</h4>
@@ -284,6 +286,7 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                                             className="w-full px-3 py-1.5 border border-slate-300 rounded-none text-xs bg-white text-slate-900 focus:outline-none focus:border-slate-800"
                                         />
                                     </div>
+
                                     <div>
                                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                                             Confirm New Password
@@ -299,7 +302,7 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                                     </div>
                                 </div>
 
-                                <div className="pt-1 flex justify-end">
+                                <div className="flex justify-end pt-1">
                                     <button
                                         type="submit"
                                         disabled={passwordLoading}
@@ -312,7 +315,6 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                             </form>
                         </div>
                     )}
-
                 </div>
 
                 {/* ── Modal Footer ────────────────────────────────────────── */}
@@ -320,7 +322,7 @@ export default function AdminProfileModal({ isOpen, onClose }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-4 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-none hover:bg-slate-100 transition"
+                        className="px-4 py-1.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition rounded-none"
                     >
                         Close
                     </button>

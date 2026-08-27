@@ -352,24 +352,24 @@ export function AIAssistantInterface({ onQuerySubmit, isPreview = false }) {
                 m.role === "user" ? "justify-end" : "justify-start"
               }`}
             >
-              {m.role !== "user" && (
-                <div className="w-7 h-7 bg-slate-900 flex items-center justify-center text-white shrink-0 rounded-none mt-0.5">
-                  <Bot size={15} />
-                </div>
-              )}
-              <div
-                className={`p-3.5 text-xs sm:text-sm leading-relaxed max-w-[85%] rounded-none whitespace-pre-wrap ${
-                  m.role === "user"
-                    ? "bg-slate-900 text-white font-medium"
-                    : "bg-white text-slate-900 border border-slate-300 shadow-none font-normal"
-                }`}
-              >
-                {m.content}
-              </div>
-              {m.role === "user" && (
-                <div className="w-7 h-7 bg-slate-700 flex items-center justify-center text-white shrink-0 rounded-none mt-0.5">
-                  <User size={15} />
-                </div>
+              {m.role === "user" ? (
+                <>
+                  <div className="py-2.5 px-4 text-xs sm:text-sm leading-relaxed max-w-[85%] rounded-none whitespace-pre-wrap bg-slate-100 text-slate-900 border border-slate-200 font-medium text-right sm:text-left">
+                    {m.content}
+                  </div>
+                  <div className="w-7 h-7 bg-slate-200 border border-slate-300 flex items-center justify-center text-slate-700 shrink-0 rounded-none mt-0.5">
+                    <User size={14} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="w-7 h-7 bg-slate-900 flex items-center justify-center text-white shrink-0 rounded-none mt-0.5">
+                    <Bot size={14} />
+                  </div>
+                  <div className="p-3.5 text-xs sm:text-sm leading-relaxed max-w-[85%] rounded-none whitespace-pre-wrap bg-white text-slate-900 border border-slate-200 font-normal">
+                    {m.content}
+                  </div>
+                </>
               )}
             </div>
           ))}
