@@ -378,14 +378,17 @@ For detailed documentation, see the `/docs` folder:
 
 ---
 
-## 🧪 Testing
-
-```bash
 ## 🧪 Testing & Quality Assurance
 
 ```bash
-# Run all automated tests (321 test cases — 100% pass rate)
+# Run all automated tests (344 test cases across Unit, Integration, API, E2E)
 ./venv/bin/pytest backend/tests/ -v
+
+# Run by testing category
+./venv/bin/pytest backend/tests/unit/ -v          # Unit Tests
+./venv/bin/pytest backend/tests/integration/ -v   # Integration & Multi-tenant Tests
+./venv/bin/pytest backend/tests/api/ -v           # REST & GraphQL API Tests
+./venv/bin/pytest backend/tests/e2e/ -v           # End-to-End Workflow Tests
 
 # Run with coverage report
 ./venv/bin/pytest backend/tests/ --cov=app --cov-report=term-missing
@@ -395,15 +398,15 @@ For detailed documentation, see the `/docs` folder:
 
 ## ⚡ Performance Benchmarks
 
-The benchmark suite is located in `backend/benchmark/`:
+The benchmark suite is located in `backend/tests/benchmark/`:
 
 ```bash
 # 1. Run concurrency and throughput latency benchmark
 cd backend
-../venv/bin/python benchmark/run_latency_benchmark.py
+../venv/bin/python tests/benchmark/run_latency_benchmark.py
 
 # 2. Run Locust load testing suite
-../venv/bin/locust -f benchmark/locustfile.py --headless -u 100 -r 10 --run-time 1m --host http://localhost:8000
+../venv/bin/locust -f tests/benchmark/locustfile.py --headless -u 100 -r 10 --run-time 1m --host http://localhost:8000
 ```
 
 ---
@@ -424,9 +427,13 @@ InvIQ/
 │   │   ├── core/                 # Config, security (Argon2id, JWT, Google OAuth), middleware
 │   │   ├── infrastructure/       # Database models/repos, Upstash Redis, Azure Blob Storage, Qdrant
 │   │   └── workers/              # Celery background task processing & Celery Beat
-│   ├── benchmark/                # Concurrency benchmarks and Locust load tests
 │   ├── scripts/                  # Super-admin provisioning and data seeding utilities
-│   └── tests/                    # 343 automated unit, integration, and security tests
+│   └── tests/                    # 344 automated test cases & benchmark suite
+│       ├── unit/                 # Domain, service, exception, security unit tests
+│       ├── integration/          # Multi-tenant isolation, UoM, import, event pipeline
+│       ├── api/                  # REST, GraphQL, WebSocket, Billing endpoints
+│       ├── e2e/                  # Daily operations, onboarding, master data workflows
+│       └── benchmark/            # Concurrency benchmarks, Locust load tests, latency profiling
 ├── frontend/
 │   ├── src/
 │   │   ├── components/           # Reusable React components & Tailwind styles

@@ -19,7 +19,9 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 
 # Ensure backend root is on sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+backend_root = Path(__file__).resolve().parents[2]
+if str(backend_root) not in sys.path:
+    sys.path.insert(0, str(backend_root))
 
 from fastapi.testclient import TestClient
 from app.main import app

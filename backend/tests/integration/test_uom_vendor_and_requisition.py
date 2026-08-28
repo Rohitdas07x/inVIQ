@@ -27,10 +27,9 @@ def req_uom_env(db, admin_user):
         db.commit()
 
     # Create location
-    loc = db.query(Location).filter(Location.id == 60).first()
+    loc = db.query(Location).filter(Location.name == "Emergency Ward Pharmacy").first()
     if not loc:
         loc = Location(
-            id=60,
             org_id=1,
             name="Emergency Ward Pharmacy",
             type="department_store",
@@ -38,6 +37,11 @@ def req_uom_env(db, admin_user):
         )
         db.add(loc)
         db.commit()
+        db.refresh(loc)
+    else:
+        loc.org_id = 1
+        db.commit()
+        db.refresh(loc)
 
     headers = get_auth_header(client, admin_user["username"], admin_user["password"])
     return client, headers, loc
@@ -61,7 +65,13 @@ def test_requisition_uom_lifecycle(req_uom_env, db):
         db.add(item)
         db.commit()
         db.refresh(item)
+    else:
+        item.org_id = 1
+        db.commit()
+        db.refresh(item)
 
+    pkg_box = db.query(ItemPackaging).filter(ItemPackaging.item_id == item.id, ItemPackaging.unit_name == "box").first()
+    if not pkg_box:
         pkg_box = ItemPackaging(
             item_id=item.id,
             org_id=1,

@@ -10,10 +10,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 os.environ["ENVIRONMENT"] = "testing"
+os.environ["SMTP_ENABLED"] = "false"
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
+
+from app.core.config import settings
+# Disable real external SMTP transport during testing
+settings.SMTP_ENABLED = False
 
 from app.infrastructure.database.connection import Base
 from app.main import app

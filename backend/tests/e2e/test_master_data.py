@@ -11,7 +11,7 @@ Verifies:
 """
 
 import pytest
-from datetime import date
+from datetime import date, timedelta
 from app.infrastructure.database.models import User, Organization, Location, Item, InventoryTransaction, VendorUpload
 from app.core.security import create_access_token, hash_password
 from app.application.cache_service import cache_invalidate_pattern
@@ -25,7 +25,15 @@ def clear_caches_before_test():
 
 
 def _auth_headers(user: User) -> dict:
-    token = create_access_token(data={"sub": str(user.id)})
+    token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role,
+            "org_id": user.org_id,
+        },
+        expires_delta=timedelta(hours=1),
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

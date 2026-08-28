@@ -32,12 +32,12 @@ This directory contains dedicated performance benchmarking, latency profiling, a
 
 ### 1. Run Real Latency & Profiling Benchmark:
 ```bash
-python backend/benchmark/run_latency_benchmark.py
+python backend/tests/benchmark/run_latency_benchmark.py
 ```
-*Outputs real p50, p95, p99 percentiles directly into `backend/benchmark/benchmark_results.json`.*
+*Outputs real p50, p95, p99 percentiles directly into `backend/tests/benchmark/benchmark_results.json`.*
 
 ### 2. Run Locust Load Testing:
 ```bash
-locust -f backend/benchmark/locustfile.py --host=http://localhost:8000
+locust -f backend/tests/benchmark/locustfile.py --host=http://localhost:8000
 ```
 Open [http://localhost:8089](http://localhost:8089) in your browser to start generating concurrent virtual user traffic.

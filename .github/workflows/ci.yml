@@ -84,8 +84,8 @@ jobs:
             --quiet \
             --no-header \
             --timeout=120 \
-            --ignore=tests/test_vector_memory.py \
-            --ignore=tests/test_chat.py \
+            --ignore=tests/integration/test_vector_memory.py \
+            --ignore=tests/api/test_chat.py \
             -x
 
 

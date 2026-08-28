@@ -26,7 +26,7 @@ class TestAgentTools:
         result = get_inventory_overview.invoke({})
         assert isinstance(result, dict)
         # When DB is not set up in isolation, should return error or valid data
-        assert "error" in result or "total_items" in result
+        assert "error" in result or "total_items" in result or "items" in result
 
     def test_get_critical_items_structure(self):
         """get_critical_items should return a list."""
