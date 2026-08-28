@@ -29,6 +29,119 @@ const LOCATION_COLORS = [
     '#F59E0B', // Amber
 ];
 
+import { Skeleton } from '../../components/ui/skeleton';
+
+export const DashboardSkeleton = () => {
+    return (
+        <div className="flex flex-col min-h-full">
+            {/* Top Bar Skeleton */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5 shadow-2xs">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <Skeleton className="h-7 w-48 rounded-none" />
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <Skeleton className="h-8 w-40 rounded-none" />
+                        <Skeleton className="h-8 w-36 rounded-none" />
+                        <div className="pl-1 border-l border-slate-200">
+                            <Skeleton className="h-8 w-8 rounded-none" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Page Content Skeleton Container */}
+            <div className="p-6 md:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+                {/* 4 KPI Matrix Skeleton */}
+                <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 shadow-none">
+                    {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="p-6 flex flex-col justify-between space-y-4">
+                            <div className="space-y-2">
+                                <Skeleton className="h-3 w-36 rounded-none" />
+                                <Skeleton className="h-8 w-24 rounded-none mt-2" />
+                            </div>
+                            <Skeleton className="h-3.5 w-28 rounded-none mt-2" />
+                        </div>
+                    ))}
+                </div>
+
+                {/* Connected Charts Grid Matrix Skeleton */}
+                <div className="bg-white border border-slate-200 rounded-none grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 shadow-none">
+                    {/* Left Chart Skeleton (Donut / Pie Chart) */}
+                    <div className="p-6 space-y-4">
+                        <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                                <Skeleton className="h-5 w-48 rounded-none" />
+                                <Skeleton className="h-4 w-20 rounded-none" />
+                            </div>
+                            <Skeleton className="h-3 w-72 rounded-none" />
+                        </div>
+                        <div className="h-64 flex flex-col items-center justify-center space-y-4 pt-2">
+                            <div className="relative flex items-center justify-center">
+                                <Skeleton className="w-40 h-40 rounded-full" />
+                                <div className="absolute w-24 h-24 bg-white rounded-full" />
+                            </div>
+                            <div className="flex items-center gap-4 pt-2">
+                                <Skeleton className="h-3 w-16 rounded-none" />
+                                <Skeleton className="h-3 w-16 rounded-none" />
+                                <Skeleton className="h-3 w-16 rounded-none" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right Chart Skeleton (Horizontal Bar Chart) */}
+                    <div className="p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                    <Skeleton className="h-5 w-52 rounded-none" />
+                                    <Skeleton className="h-4 w-24 rounded-none" />
+                                </div>
+                                <Skeleton className="h-3 w-64 rounded-none" />
+                            </div>
+                            <Skeleton className="h-4 w-16 rounded-none" />
+                        </div>
+                        <div className="h-64 flex flex-col justify-around pt-3 pr-2">
+                            {[90, 75, 60, 45, 30].map((widthPct, idx) => (
+                                <div key={idx} className="flex items-center gap-3">
+                                    <Skeleton className="h-3 w-28 rounded-none shrink-0" />
+                                    <Skeleton 
+                                        className="h-5 rounded-none" 
+                                        style={{ width: `${widthPct}%` }} 
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Top Critical Shortages Skeleton */}
+                <div className="bg-white border border-slate-200 rounded-none shadow-none p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="space-y-1.5">
+                            <Skeleton className="h-5 w-44 rounded-none" />
+                            <Skeleton className="h-3 w-56 rounded-none" />
+                        </div>
+                        <Skeleton className="h-5 w-20 rounded-none" />
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                            <div key={i} className="py-3.5 flex items-center justify-between">
+                                <div className="space-y-1.5">
+                                    <Skeleton className="h-4 w-48 rounded-none" />
+                                    <Skeleton className="h-3 w-36 rounded-none" />
+                                </div>
+                                <div className="space-y-1.5 flex flex-col items-end">
+                                    <Skeleton className="h-4 w-16 rounded-none" />
+                                    <Skeleton className="h-2.5 w-12 rounded-none" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const Dashboard = () => {
     const [stats, setStats] = useState(null);
     const [locations, setLocations] = useState([]);
@@ -96,12 +209,24 @@ const Dashboard = () => {
     const hasActiveFilters = Boolean(selectedLocation || selectedCategory);
 
     if (loading && !stats) {
-        return <div className="flex h-full items-center justify-center text-slate-400 py-16">Loading analytics...</div>;
+        return <DashboardSkeleton />;
     }
     if (error && !stats) {
-        return <div className="p-4 bg-red-50 text-red-600 rounded-lg">{error}</div>;
+        return (
+            <div className="p-8 max-w-7xl mx-auto w-full">
+                <div className="p-6 bg-red-50 border border-red-200 text-red-700 rounded-none space-y-3">
+                    <p className="font-semibold text-sm">{error}</p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-4 py-2 bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors rounded-none"
+                    >
+                        Retry Loading
+                    </button>
+                </div>
+            </div>
+        );
     }
-    if (!stats) return null;
+    if (!stats) return <DashboardSkeleton />;
 
     const category_distribution = stats.category_distribution || [];
     const low_stock_items = stats.low_stock_items || [];
